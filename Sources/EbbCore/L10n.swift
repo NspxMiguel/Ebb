@@ -83,7 +83,11 @@ public enum Settings {
     public static let suiteName = "com.ebb.app"
     public static let languageKey = "language"
 
+    /// Inside Ebb.app the suite IS the app's own domain, and AppKit refuses a
+    /// suite named after the running bundle ("does not make sense and will not
+    /// work"). The CLI is a separate process and reads the same plist as a suite.
     public static var defaults: UserDefaults {
-        UserDefaults(suiteName: suiteName) ?? .standard
+        if Bundle.main.bundleIdentifier == suiteName { return .standard }
+        return UserDefaults(suiteName: suiteName) ?? .standard
     }
 }
