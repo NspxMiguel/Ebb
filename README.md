@@ -66,7 +66,10 @@ own retention applies.
 ## Safety
 
 - Starred (Gmail) and flagged (iCloud) messages are kept by default
-- Drafts are never touched
+- Drafts are never touched, and neither are `Notes` folders (Apple Notes and
+  Gmail store notes as IMAP messages)
+- When a server lists a folder with a SPECIAL-USE flag (`\Trash`, `\Sent`, …),
+  that flag decides the folder's role; names are only a fallback
 - Per-folder exclusions
 - Dry run: `ebb scan`
 - Delete-everything requires typing the account username (app) or passing
@@ -77,8 +80,12 @@ own retention applies.
 
 ## CLI reference
 
-`<account>` is the username or the account UUID. Passwords are read from stdin,
-never from an argument.
+`<account>` is the username, the account UUID, or the 8-character short id
+shown by `ebb accounts`. Passwords are read from stdin, never from an argument.
+
+The app and the CLI are separate binaries, so the first time one of them reads a
+password the other one saved, macOS asks for keychain access; choose
+"Always Allow".
 
 | Command | Description | Example |
 | --- | --- | --- |
