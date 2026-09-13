@@ -1,0 +1,10 @@
+.build/
+build/
+.DS_Store
+*.xcodeproj
+.swiftpm/
+PEDIDOS.md
+CONTRATO.md
+IDEIAS.md
+TRABALHO.md
+DESIGN.md
