@@ -36,13 +36,20 @@ extension Cleaner {
             let inbox = boxes.first { $0.role == .inbox && $0.selectable }?.rawName ?? "INBOX"
             guard try await client.select(inbox) > 0, limit > 0 else { return [] }
 
-            // UIDs grow with arrival, so the highest ones are the newest.
-            let newest = Array(try await client.uidSearch("ALL").sorted().suffix(limit))
-            guard !newest.isEmpty else { return [] }
+            // UIDs grow with arrival, but a message moved or imported later keeps
+            // its old INTERNALDATE under a new, high UID. Read the dates of a window
+            // of the highest UIDs (cheap: no headers) and pick the newest by date.
+            let window = Array(try await client.uidSearch("ALL").sorted().suffix(max(limit * 4, 200)))
+            guard !window.isEmpty else { return [] }
+            let dates = try await client.fetchMeta(window, labels: false)
+            let newest = window
+                .filter { dates[$0] != nil }
+                .sorted { dates[$0]!.internalDate > dates[$1]!.internalDate }
+                .prefix(limit)
             let fetched = try await client.fetchMessages(
-                newest, labels: client.isGmail, headers: true, bodyBytes: 4096)
+                Array(newest), labels: client.isGmail, headers: true, bodyBytes: 4096)
 
-            return newest.reversed().compactMap { uid -> DigestMessage? in
+            return newest.compactMap { uid -> DigestMessage? in
                 guard let message = fetched[uid] else { return nil }
                 let headers = MessageHeaders.parse(message.rawHeaders ?? "")
                 return DigestMessage(

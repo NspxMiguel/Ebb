@@ -14,6 +14,8 @@ final class FakeIMAPServer: @unchecked Sendable {
         let internalDate: Date
         var flags: Set<String>
         var labels: Set<String>
+        var rawHeaders: String = ""
+        var rawBody: String = ""
     }
 
     private struct View {
@@ -156,7 +158,10 @@ final class FakeIMAPServer: @unchecked Sendable {
     }
 
     private func send(_ text: String, to socket: Int32) -> Bool {
-        let bytes = Array(text.utf8)
+        send(Data(text.utf8), to: socket)
+    }
+
+    private func send(_ bytes: Data, to socket: Int32) -> Bool {
         return bytes.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {
@@ -196,7 +201,12 @@ final class FakeIMAPServer: @unchecked Sendable {
                             ? "LOGIN \(arguments.count > 1 ? Self.quote(arguments[1]) : "") <redacted>"
                             : line.drop(while: { $0.isWhitespace }).dropFirst(tag.count)
                                 .trimmingCharacters(in: .whitespaces))
-                    return respond(arguments, tag: tag, selected: &selected, authenticated: &authenticated)
+                    if authenticated, let view = selected, arguments.count >= 4,
+                        arguments[0].uppercased() == "UID", arguments[1].uppercased() == "FETCH"
+                    {
+                        return fetch(arguments, request: line, tag: tag, view: view)
+                    }
+                    return Data(respond(arguments, tag: tag, selected: &selected, authenticated: &authenticated).utf8)
                 }
                 guard send(reply, to: socket), arguments[0].uppercased() != "LOGOUT" else { return }
             }
@@ -247,7 +257,10 @@ final class FakeIMAPServer: @unchecked Sendable {
     }
 
     @discardableResult
-    func addMessage(to mailbox: String, internalDate: Date, flags: Set<String> = [], labels: Set<String> = []) -> Int {
+    func addMessage(
+        to mailbox: String, internalDate: Date, flags: Set<String> = [], labels: Set<String> = [],
+        rawHeaders: String = "", rawBody: String = ""
+    ) -> Int {
         locked {
             guard let view = viewIndex(mailbox), !views[view].attributes.contains("\\Noselect") else {
                 preconditionFailure("Unknown or unselectable mailbox: \(mailbox)")
@@ -257,7 +270,8 @@ final class FakeIMAPServer: @unchecked Sendable {
             let normalizedFlags = Set(flags.map(Self.canonicalFlag))
             var message = Message(
                 id: id, internalDate: internalDate,
-                flags: normalizedFlags.subtracting(["\\Deleted"]), labels: labels)
+                flags: normalizedFlags.subtracting(["\\Deleted"]), labels: labels, rawHeaders: rawHeaders,
+                rawBody: rawBody)
             if profile == .gmail {
                 message.labels = Set(message.labels.map(canonicalLabel))
                 if mailbox != "[Gmail]/All Mail" { message.labels.insert(canonicalLabel(mailbox)) }
@@ -304,6 +318,7 @@ final class FakeIMAPServer: @unchecked Sendable {
 
     private func canonicalLabel(_ name: String) -> String {
         switch name.lowercased() {
+        case "\\important": return "\\Important"
         case "inbox", "\\inbox": return "\\Inbox"
         case "[gmail]/sent mail", "\\sent": return "\\Sent"
         case "[gmail]/drafts", "\\drafts": return "\\Drafts"
@@ -382,6 +397,68 @@ final class FakeIMAPServer: @unchecked Sendable {
         return result
     }
 
+    fileprivate func fetch(_ args: [String], request: String, tag: String, view: Int) -> Data {
+        guard let uids = uidSet(args[2], in: view) else { return Data("\(tag) BAD Invalid UID set\r\n".utf8) }
+        let pattern = #"BODY(\.PEEK)?\[(HEADER\.FIELDS\s*\(([^)]*)\)|TEXT)\](?:<0\.([0-9]+)>)?"#
+        let regex = try! NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        let source = request as NSString
+        let sections = regex.matches(in: request, range: NSRange(location: 0, length: source.length))
+        let ordered = views[view].messages.keys.sorted()
+        var response = Data()
+        func append(_ text: String) { response.append(contentsOf: text.utf8) }
+        for uid in uids.sorted() {
+            let id = views[view].messages[uid]!
+            if sections.contains(where: { $0.range(at: 1).location == NSNotFound }) {
+                messages[id]!.flags.insert("\\Seen")
+            }
+            let message = messages[id]!
+            var flags = message.flags
+            if views[view].deleted.contains(uid) { flags.insert("\\Deleted") }
+            append(
+                "* \(ordered.firstIndex(of: uid)! + 1) FETCH (UID \(uid) INTERNALDATE \(Self.quote(Self.formatter("dd-MMM-yyyy HH:mm:ss Z").string(from: message.internalDate))) FLAGS (\(flags.sorted().joined(separator: " ")))"
+            )
+            if profile == .gmail && args.map({ $0.uppercased() }).contains("X-GM-LABELS") {
+                append(" X-GM-LABELS (\(message.labels.sorted().map(Self.quote).joined(separator: " ")))")
+            }
+            for section in sections {
+                let data: Data
+                let item: String
+                if section.range(at: 3).location != NSNotFound {
+                    let fields = source.substring(with: section.range(at: 3))
+                    let names = Set(fields.split(whereSeparator: { $0.isWhitespace }).map { $0.lowercased() })
+                    var lines: [String] = []
+                    var include = false
+                    for line in message.rawHeaders.replacingOccurrences(of: "\r\n", with: "\n").components(
+                        separatedBy: "\n")
+                    {
+                        if line.isEmpty { break }
+                        if !line.hasPrefix(" ") && !line.hasPrefix("\t") {
+                            include = line.firstIndex(of: ":").map { names.contains(line[..<$0].lowercased()) } ?? false
+                        }
+                        if include { lines.append(line) }
+                    }
+                    data = Data((lines.joined(separator: "\r\n") + (lines.isEmpty ? "\r\n" : "\r\n\r\n")).utf8)
+                    item = "BODY[HEADER.FIELDS (\(fields))]"
+                } else {
+                    let body = Data(message.rawBody.utf8)
+                    if section.range(at: 4).location != NSNotFound {
+                        let count = Int(source.substring(with: section.range(at: 4))) ?? 0
+                        data = Data(body.prefix(count))
+                        item = "BODY[TEXT]<0>"
+                    } else {
+                        data = body
+                        item = "BODY[TEXT]"
+                    }
+                }
+                append(" \(item) {\(data.count)}\r\n")
+                response.append(data)
+            }
+            append(")\r\n")
+        }
+        append("\(tag) OK Completed\r\n")
+        return response
+    }
+
     private func respond(_ args: [String], tag: String, selected: inout Int?, authenticated: inout Bool) -> String {
         let upper = args.map { $0.uppercased() }
         func ok(_ text: String = "Completed") -> String { "\(tag) OK \(text)\r\n" }
@@ -445,22 +522,6 @@ final class FakeIMAPServer: @unchecked Sendable {
         }
         guard let uids = uidSet(args[2], in: view) else { return bad() }
         switch upper[1] {
-        case "FETCH":
-            guard args.count >= 4,
-                upper.dropFirst(3).allSatisfy({ ["UID", "INTERNALDATE", "FLAGS", "X-GM-LABELS"].contains($0) })
-            else { return bad() }
-            let ordered = views[view].messages.keys.sorted()
-            let formatter = Self.formatter("dd-MMM-yyyy HH:mm:ss Z")
-            return uids.sorted().map { uid in
-                let message = messages[views[view].messages[uid]!]!
-                var flags = message.flags
-                if views[view].deleted.contains(uid) { flags.insert("\\Deleted") }
-                let labels =
-                    profile == .gmail
-                    ? " X-GM-LABELS (\(message.labels.sorted().map(Self.quote).joined(separator: " ")))" : ""
-                return
-                    "* \(ordered.firstIndex(of: uid)! + 1) FETCH (UID \(uid) INTERNALDATE \(Self.quote(formatter.string(from: message.internalDate))) FLAGS (\(flags.sorted().joined(separator: " ")))\(labels))\r\n"
-            }.joined() + ok()
         case "STORE":
             guard args.count >= 5, upper[3] == "+FLAGS.SILENT" else { return bad() }
             for uid in uids {
@@ -503,7 +564,8 @@ final class FakeIMAPServer: @unchecked Sendable {
                     nextID += 1
                     let original = messages[id]!
                     messages[copyID] = Message(
-                        id: copyID, internalDate: original.internalDate, flags: original.flags, labels: [])
+                        id: copyID, internalDate: original.internalDate, flags: original.flags, labels: [],
+                        rawHeaders: original.rawHeaders, rawBody: original.rawBody)
                     insert(copyID, into: destination)
                     destinations.append(views[destination].messages.first { $0.value == copyID }!.key)
                 }
@@ -628,6 +690,64 @@ final class FakeIMAPServerTests: XCTestCase {
         try server.start()
         addTeardownBlock { server.stop() }
         return server
+    }
+
+    func testFetchLiteralBytesWithoutSocketTransport() {
+        let server = FakeIMAPServer(profile: .gmail)
+        server.addMessage(
+            to: "INBOX", internalDate: Date(), labels: ["\\Important"],
+            rawHeaders: "X-Hidden: secret\nSubject: Olá\n\tfolded\nFrom: sender\n",
+            rawBody: "A😀Z")
+        let response = server.fetch(
+            ["UID", "FETCH", "1", "X-GM-LABELS"],
+            request: "T1 UID FETCH 1 (X-GM-LABELS BODY.PEEK[HEADER.FIELDS (From Subject)] BODY.PEEK[TEXT]<0.3>)",
+            tag: "T1", view: 0)
+        let headers = "Subject: Olá\r\n\tfolded\r\nFrom: sender\r\n\r\n"
+        XCTAssertNotNil(
+            response.range(of: Data("BODY[HEADER.FIELDS (From Subject)] {\(headers.utf8.count)}\r\n\(headers)".utf8)))
+        var partial = Data("BODY[TEXT]<0> {3}\r\n".utf8)
+        partial.append(contentsOf: [0x41, 0xF0, 0x9F])
+        partial.append(contentsOf: ")\r\nT1 OK Completed\r\n".utf8)
+        XCTAssertTrue(response.suffix(partial.count).elementsEqual(partial))
+        XCTAssertNil(response.range(of: Data("X-Hidden".utf8)))
+        XCTAssertNotNil(response.range(of: Data("Important".utf8)))
+        XCTAssertFalse(server.contents(of: "INBOX")[0].flags.contains("\\Seen"))
+        _ = server.fetch(
+            ["UID", "FETCH", "1", "BODY[TEXT]"],
+            request: "T2 UID FETCH 1 BODY[TEXT]", tag: "T2", view: 0)
+        XCTAssertTrue(server.contents(of: "INBOX")[0].flags.contains("\\Seen"))
+    }
+
+    func testHeaderAndPartialBodyLiteralsPreserveStoredOrderAndPeekFlags() throws {
+        for profile in [FakeIMAPServer.Profile.icloud, .gmail] {
+            let server = try server(profile)
+            server.addMessage(
+                to: "INBOX", internalDate: Date(), labels: ["\\Important"],
+                rawHeaders:
+                    "X-Ignored: private\r\nSubject: Olá\r\n\tfolded\r\nFrom: person@example.com\r\nSubject: duplicate\r\nContent-Type: text/plain\r\n",
+                rawBody: "Hello world")
+            let client = try Client(port: server.port)
+            try client.command("LOGIN test test-password")
+            try client.command("SELECT INBOX")
+            let response = try client.command(
+                "UID FETCH 1 (UID FLAGS X-GM-LABELS BODY.PEEK[HEADER.FIELDS (From sUbJeCt)] BODY.PEEK[TEXT]<0.5>)")
+            let headers = "Subject: Olá\r\n\tfolded\r\nFrom: person@example.com\r\nSubject: duplicate\r\n\r\n"
+            XCTAssertTrue(
+                response.contains(
+                    "BODY[HEADER.FIELDS (From sUbJeCt)] {\(headers.utf8.count)}\n"
+                        + headers.replacingOccurrences(of: "\r\n", with: "\n")))
+            XCTAssertTrue(response.contains("BODY[TEXT]<0> {5}\nHello"))
+            XCTAssertFalse(response.contains("X-Ignored"))
+            XCTAssertFalse(response.contains("Content-Type:"))
+            XCTAssertFalse(server.contents(of: "INBOX")[0].flags.contains("\\Seen"))
+            if profile == .gmail { XCTAssertTrue(response.contains("Important")) }
+            let empty = try client.command("UID FETCH 1 (BODY.PEEK[HEADER.FIELDS (Missing)])")
+            XCTAssertTrue(empty.contains("BODY[HEADER.FIELDS (Missing)] {2}\n\n"))
+            try client.command("UID FETCH 1 (BODY[TEXT]<0.5>)")
+            XCTAssertTrue(server.contents(of: "INBOX")[0].flags.contains("\\Seen"))
+            try client.command("LOGOUT")
+            server.stop()
+        }
     }
 
     func testGmailLabelExpungeArchiveMoveAndPermanentDeletion() throws {
