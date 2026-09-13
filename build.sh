@@ -21,14 +21,20 @@ if [ "${1:-}" = "--no-universal" ]; then
 fi
 
 echo "==> Compiling (release$([[ -z "$ARCH_FLAGS" ]] && echo ", $(uname -m)" || echo ", arm64 + x86_64"))"
+# shellcheck disable=SC2086
 swift build -c release $ARCH_FLAGS --product Ebb
+# shellcheck disable=SC2086
 swift build -c release $ARCH_FLAGS --product EbbCLI
+# A universal build lands in .build/apple/Products/Release, a single-arch one
+# in .build/<triple>/release; ask SwiftPM instead of guessing.
+# shellcheck disable=SC2086
+BIN="$(swift build -c release $ARCH_FLAGS --show-bin-path)"
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
-cp .build/apple/Products/Release/Ebb "$APP/Contents/MacOS/Ebb"
-cp .build/apple/Products/Release/EbbCLI "$APP/Contents/Helpers/ebb"
+cp "$BIN/Ebb" "$APP/Contents/MacOS/Ebb"
+cp "$BIN/EbbCLI" "$APP/Contents/Helpers/ebb"
 
 echo "==> Drawing the icon"
 rm -rf build/AppIcon.iconset
@@ -36,7 +42,7 @@ swift Tools/makeicon.swift build/AppIcon.iconset >/dev/null
 iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf build/AppIcon.iconset
 
-cat > "$APP/Contents/Info.plist" <<PLIST
+cat >"$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -57,34 +63,33 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Sign the helper binary first, then the bundle.
-# A local certificate pins the requirement to the certificate instead of the
-# cdhash, so the Accessibility grant survives future versions.
+# A file copied out of a tarball can arrive quarantined; clear it before signing.
+xattr -cr "$APP"
+
+# Ad-hoc signing changes the cdhash on every build, and the keychain remembers
+# "Always Allow" per designated requirement: every rebuild would ask again for
+# the app password. A local certificate pins the requirement to the certificate,
+# which does not change. Whoever installs through the tap has no such
+# certificate and gets ad-hoc, which is fine for a fresh install.
 SIGN_ID="NSPX Local Code Signing"
 SIGN_KEYCHAIN="$HOME/Library/Keychains/nspx-codesign.keychain-db"
 signed_locally=false
 
 if [ -f "$SIGN_KEYCHAIN" ] && security find-identity -p codesigning "$SIGN_KEYCHAIN" 2>/dev/null | grep -q "$SIGN_ID"; then
   echo "==> Signing with $SIGN_ID"
-  if codesign --force --deep --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" "$APP/Contents/Helpers/ebb" 2>/tmp/ebb-codesign.log; then
-    if codesign --force --deep --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" "$APP" 2>/tmp/ebb-codesign.log; then
-      signed_locally=true
-    else
-      echo "==> Bundle signing failed ($(tail -1 /tmp/ebb-codesign.log)), falling back to ad-hoc"
-    fi
+  if codesign --force --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" "$APP/Contents/Helpers/ebb" 2>/tmp/ebb-codesign.log &&
+    codesign --force --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" "$APP" 2>>/tmp/ebb-codesign.log; then
+    signed_locally=true
   else
-    echo "==> Helper signing failed ($(tail -1 /tmp/ebb-codesign.log)), falling back to ad-hoc"
+    echo "==> Local signing failed ($(tail -1 /tmp/ebb-codesign.log)), falling back to ad-hoc"
   fi
 fi
 
 if [ "$signed_locally" = false ]; then
   echo "==> Signing (ad-hoc)"
-  xattr -cr "$APP"
-  codesign --force --deep --sign - "$APP/Contents/Helpers/ebb"
-  codesign --force --deep --sign - "$APP"
+  codesign --force --sign - "$APP/Contents/Helpers/ebb"
+  codesign --force --sign - "$APP"
 fi
-
-xattr -cr "$APP"
 
 echo "==> Done: $APP ($VERSION)"
 echo "==> CLI at: $APP/Contents/Helpers/ebb"

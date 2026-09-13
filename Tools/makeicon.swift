@@ -1,96 +1,82 @@
 #!/usr/bin/env swift
 import AppKit
 
-// Draws AppIcon.icns: a deep sea teal rounded square with three white
-// horizontal wave strokes stacked in the lower half, suggesting an ebbing tide.
-// No text, no emoji. Generated at build time.
+// Draws the Ebb icon set: a deep sea teal rounded square with three white
+// waves in the lower half, shorter and fainter towards the bottom, like a tide
+// going out. Run at build time: `swift Tools/makeicon.swift <out.iconset>`.
 
-func drawIcon(size: CGFloat) -> NSImage {
-  let image = NSImage(size: NSSize(width: size, height: size))
-  image.lockFocus()
-  guard let ctx = NSGraphicsContext.current?.cgContext else {
-    image.unlockFocus()
-    return image
-  }
-  ctx.setShouldAntialias(true)
-
-  // Rounded square background with generous margins.
-  let inset = size * 0.1
-  let rect = NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
-  let radius = rect.width * 0.225
-  let background = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-
-  // Deep sea teal fill with subtle gradient.
-  let colorTop = NSColor(
-    red: 14.0 / 255.0,
-    green: 110.0 / 255.0,
-    blue: 115.0 / 255.0,
-    alpha: 1.0
-  )
-  let colorBottom = NSColor(
-    red: 20.0 / 255.0,
-    green: 130.0 / 255.0,
-    blue: 135.0 / 255.0,
-    alpha: 1.0
-  )
-
-  let gradient = NSGradient(starting: colorTop, ending: colorBottom)
-  gradient?.draw(in: background, angle: 90)
-
-  // Three white horizontal wave strokes in the lower half, decreasing width.
-  let waveAreaStart = rect.midY + rect.height * 0.05
-  let waveSpacing = rect.height * 0.12
-
-  let strokeColor = NSColor.white
-  strokeColor.setStroke()
-
-  // Wave 1: widest, highest opacity
-  let wave1 = NSBezierPath()
-  wave1.lineWidth = size * 0.038
-  wave1.lineCapStyle = .round
-  wave1.move(to: NSPoint(x: rect.minX + rect.width * 0.15, y: waveAreaStart))
-  wave1.line(to: NSPoint(x: rect.maxX - rect.width * 0.15, y: waveAreaStart))
-  wave1.stroke()
-
-  // Wave 2: medium width, medium opacity
-  let wave2 = NSBezierPath()
-  wave2.lineWidth = size * 0.028
-  wave2.lineCapStyle = .round
-  wave2.move(to: NSPoint(x: rect.minX + rect.width * 0.22, y: waveAreaStart + waveSpacing))
-  wave2.line(to: NSPoint(x: rect.maxX - rect.width * 0.22, y: waveAreaStart + waveSpacing))
-  NSColor(white: 1, alpha: 0.85).setStroke()
-  wave2.stroke()
-
-  // Wave 3: narrowest, lowest opacity
-  let wave3 = NSBezierPath()
-  wave3.lineWidth = size * 0.018
-  wave3.lineCapStyle = .round
-  wave3.move(to: NSPoint(x: rect.minX + rect.width * 0.32, y: waveAreaStart + waveSpacing * 2))
-  wave3.line(to: NSPoint(x: rect.maxX - rect.width * 0.32, y: waveAreaStart + waveSpacing * 2))
-  NSColor(white: 1, alpha: 0.7).setStroke()
-  wave3.stroke()
-
-  image.unlockFocus()
-  return image
+func wave(in rect: NSRect, y: CGFloat, inset: CGFloat, amplitude: CGFloat, cycles: CGFloat) -> NSBezierPath {
+    let path = NSBezierPath()
+    let start = rect.minX + inset
+    let width = rect.width - inset * 2
+    let steps = 96
+    for step in 0...steps {
+        let t = CGFloat(step) / CGFloat(steps)
+        let point = NSPoint(x: start + width * t, y: y + sin(t * cycles * 2 * .pi) * amplitude)
+        step == 0 ? path.move(to: point) : path.line(to: point)
+    }
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+    return path
 }
 
-let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+func drawIcon(size: CGFloat) -> NSImage {
+    let image = NSImage(size: NSSize(width: size, height: size))
+    image.lockFocus()
+    defer { image.unlockFocus() }
+
+    // macOS icon grid: the tile leaves a margin around it for the shadow area.
+    let margin = size * 0.1
+    let tile = NSRect(x: margin, y: margin, width: size - margin * 2, height: size - margin * 2)
+    let shape = NSBezierPath(roundedRect: tile, xRadius: tile.width * 0.225, yRadius: tile.width * 0.225)
+
+    let top = NSColor(srgbRed: 20 / 255, green: 128 / 255, blue: 133 / 255, alpha: 1)
+    let bottom = NSColor(srgbRed: 14 / 255, green: 110 / 255, blue: 115 / 255, alpha: 1)
+    NSGradient(starting: bottom, ending: top)?.draw(in: shape, angle: 90)
+
+    // AppKit's origin is bottom-left: smaller y is lower on the icon.
+    let waves: [(y: CGFloat, inset: CGFloat, width: CGFloat, alpha: CGFloat)] = [
+        (0.52, 0.16, 0.050, 1.0),
+        (0.37, 0.24, 0.040, 0.78),
+        (0.23, 0.32, 0.030, 0.55),
+    ]
+    for item in waves {
+        let path = wave(
+            in: tile, y: tile.minY + tile.height * item.y, inset: tile.width * item.inset,
+            amplitude: tile.height * 0.035, cycles: 1.5)
+        path.lineWidth = size * item.width
+        NSColor(white: 1, alpha: item.alpha).setStroke()
+        path.stroke()
+    }
+    return image
+}
+
+let output = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
+try FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
 
 let variants: [(String, CGFloat)] = [
-  ("icon_16x16", 16), ("icon_16x16@2x", 32),
-  ("icon_32x32", 32), ("icon_32x32@2x", 64),
-  ("icon_128x128", 128), ("icon_128x128@2x", 256),
-  ("icon_256x256", 256), ("icon_256x256@2x", 512),
-  ("icon_512x512", 512), ("icon_512x512@2x", 1024),
+    ("icon_16x16", 16), ("icon_16x16@2x", 32),
+    ("icon_32x32", 32), ("icon_32x32@2x", 64),
+    ("icon_128x128", 128), ("icon_128x128@2x", 256),
+    ("icon_256x256", 256), ("icon_256x256@2x", 512),
+    ("icon_512x512", 512), ("icon_512x512@2x", 1024),
 ]
 
 for (name, size) in variants {
-  let image = drawIcon(size: size)
-  guard let tiff = image.tiffRepresentation,
-    let rep = NSBitmapImageRep(data: tiff),
-    let png = rep.representation(using: .png, properties: [:])
-  else { continue }
-  try? png.write(to: URL(fileURLWithPath: "\(out)/\(name).png"))
+    // Render into a bitmap of exactly `size` pixels; NSImage alone would
+    // follow the screen's scale factor and write @2x-sized files everywhere.
+    guard
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0)
+    else { continue }
+    rep.size = NSSize(width: size, height: size)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    drawIcon(size: size).draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+    try png.write(to: URL(fileURLWithPath: "\(output)/\(name).png"))
 }
-print("iconset at \(out)")
+print("iconset at \(output)")
