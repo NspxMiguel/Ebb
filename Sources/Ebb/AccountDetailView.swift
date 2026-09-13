@@ -46,6 +46,12 @@ struct AccountDetailView: View {
     private func form(_ account: Account) -> some View {
         Form {
             Section {
+                Button {
+                    AppDelegate.shared?.showSummaryWindow(accountID: account.id)
+                } label: {
+                    Label(l10n("app.summary.action"), systemImage: "text.badge.star")
+                }
+
                 Toggle(
                     l10n("app.enabled"),
                     isOn: Binding(
@@ -55,13 +61,52 @@ struct AccountDetailView: View {
                 )
 
                 Picker(
-                    l10n("app.delete_older_than"),
+                    l10n("app.disposable_age"),
                     selection: Binding(
-                        get: { AgeOption.matching(account.rule.maxAge).rawValue },
+                        get: { DisposableAgeOption.matching(account.rule.disposableAge).rawValue },
+                        set: { value in mutate { $0.rule.disposableAge = value } }
+                    )
+                ) {
+                    ForEach(DisposableAgeOption.allCases) { option in
+                        Text(l10n(option.key)).tag(option.rawValue)
+                    }
+                }
+                Text(l10n("app.disposable_what"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                ForEach(DisposableKind.allCases) { kind in
+                    Toggle(
+                        l10n("kind.\(kind.rawValue)"),
+                        isOn: Binding(
+                            get: { account.rule.disposableKinds.contains(kind) },
+                            set: { on in
+                                mutate { current in
+                                    if on {
+                                        current.rule.disposableKinds.insert(kind)
+                                    } else {
+                                        current.rule.disposableKinds.remove(kind)
+                                    }
+                                }
+                            }
+                        )
+                    )
+                }
+
+                if !account.rule.usesDisposableTier {
+                    Text(l10n("app.disposable_tier_off"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker(
+                    l10n("app.max_age"),
+                    selection: Binding(
+                        get: { MaxAgeOption.matching(account.rule.maxAge).rawValue },
                         set: { value in mutate { $0.rule.maxAge = value } }
                     )
                 ) {
-                    ForEach(AgeOption.allCases) { option in
+                    ForEach(MaxAgeOption.allCases) { option in
                         Text(l10n(option.key)).tag(option.rawValue)
                     }
                 }
@@ -73,6 +118,28 @@ struct AccountDetailView: View {
                         set: { value in mutate { $0.rule.keepFlagged = value } }
                     )
                 )
+
+                if account.provider == .gmail {
+                    Toggle(
+                        l10n("app.keep_important"),
+                        isOn: Binding(
+                            get: { account.rule.keepImportant },
+                            set: { value in mutate { $0.rule.keepImportant = value } }
+                        )
+                    )
+                }
+
+                Toggle(
+                    l10n("app.ai_triage"),
+                    isOn: Binding(
+                        get: { account.rule.aiTriage },
+                        set: { value in mutate { $0.rule.aiTriage = value } }
+                    )
+                )
+                Text(aiTriageCaption(account))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Toggle(
                     l10n("app.permanent"),
@@ -184,6 +251,10 @@ struct AccountDetailView: View {
                 if let error = run.errorMessage {
                     Text(error)
                         .foregroundStyle(.red)
+                }
+                if let warning = run.warning {
+                    Text(warning)
+                        .foregroundStyle(.orange)
                 }
             } else {
                 Text(l10n("app.never_ran"))
@@ -338,5 +409,11 @@ struct AccountDetailView: View {
         dangerResult = nil
         dangerBusy = false
         deletingAll = false
+    }
+
+    /// Says where the triage would run, so turning it on is an informed choice.
+    private func aiTriageCaption(_ account: Account) -> String {
+        guard let engine = SummaryEngine.preferred() else { return l10n("app.ai_triage.none") }
+        return engine.sendsMailOffDevice ? l10n("app.ai_triage.groq") : l10n("app.ai_triage.on_device")
     }
 }

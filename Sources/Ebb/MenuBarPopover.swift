@@ -42,6 +42,13 @@ struct MenuBarPopover: View {
                 }
             }
 
+            Button {
+                AppDelegate.shared?.showSummaryWindow(accountID: nil)
+            } label: {
+                Label(l10n("app.summary.action"), systemImage: "text.badge.star")
+            }
+            .disabled(!hasEnabledAccounts)
+
             if let previewCount {
                 Text(l10n("app.preview_result", previewCount))
                     .foregroundStyle(.secondary)
@@ -91,6 +98,11 @@ struct MenuBarPopover: View {
                 Text(error)
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .lineLimit(2)
+            } else if let warning = run.warning {
+                Text(warning)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
                     .lineLimit(2)
             } else {
                 Text(

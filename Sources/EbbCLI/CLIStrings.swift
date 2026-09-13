@@ -24,11 +24,17 @@ enum CLIStrings {
             "Lista as pastas de uma conta", "List an account's mailboxes"),
         "cli.cmd.scan": Localized(
             "Mostra o que a limpeza vai apagar", "Preview what a cleanup would delete"),
+        "cli.cmd.inbox": Localized(
+            "Lista as mensagens recentes da Entrada (só leitura)", "List recent Inbox messages (read-only)"),
         "cli.cmd.run": Localized("Roda a limpeza automática", "Run the automatic cleanup"),
+        "cli.cmd.summary": Localized(
+            "Resume as mensagens recentes de cada conta", "Summarize recent messages per account"),
         "cli.cmd.purge": Localized(
             "Apaga tudo de uma conta", "Delete everything from an account"),
         "cli.cmd.set": Localized("Edita a regra de uma conta", "Edit an account's rule"),
         "cli.cmd.lang": Localized("Mostra ou define o idioma", "Show or set the language"),
+        "cli.cmd.groq_key": Localized(
+            "Salva ou remove a chave da API da Groq", "Save or remove the Groq API key"),
         "cli.cmd.version": Localized("Mostra a versão", "Print the version"),
         "cli.cmd.help": Localized("Mostra esta ajuda", "Show this help"),
 
@@ -43,7 +49,9 @@ enum CLIStrings {
         "cli.col.username": Localized("usuário", "username"),
         "cli.col.enabled": Localized("ativo", "enabled"),
         "cli.col.max_age": Localized("idade máx.", "max age"),
+        "cli.col.disposable": Localized("descartável", "disposable"),
         "cli.col.keep_flagged": Localized("marcadas", "keep flagged"),
+        "cli.col.keep_important": Localized("importantes", "keep important"),
         "cli.col.permanent": Localized("permanente", "permanent"),
         "cli.col.last_run": Localized("última execução", "last run"),
         "cli.no_accounts": Localized(
@@ -79,6 +87,15 @@ enum CLIStrings {
         "cli.mailboxes.skipped_excluded": Localized(
             "pulada (excluída)", "skipped (excluded)"),
 
+        // inbox.
+        "cli.inbox.col.age": Localized("idade", "age"),
+        "cli.inbox.col.kind": Localized("tipo", "kind"),
+        "cli.inbox.col.flags": Localized("marcas", "flags"),
+        "cli.inbox.col.from": Localized("de", "from"),
+        "cli.inbox.col.subject": Localized("assunto", "subject"),
+        "cli.inbox.limit_bad": Localized(
+            "limite inválido: %@ (use um número > 0)", "invalid limit: %@ (use a number > 0)"),
+
         // scan.
         "cli.scan_account": Localized("%@:", "%@:"),
         "cli.scan_total": Localized("total: %d (%@)", "total: %d (%@)"),
@@ -90,6 +107,14 @@ enum CLIStrings {
         "cli.run_none": Localized("Nenhuma conta ativa.", "No enabled accounts."),
         "cli.run_summary": Localized(
             "%@: %d apagadas, %d pendentes, %@", "%@: %d deleted, %d pending, %@"),
+
+        // summary.
+        "cli.summary.header": Localized("%@:", "%@:"),
+        "cli.summary.footer": Localized("— %@", "— %@"),
+        "cli.summary.progress": Localized("%@: resumindo…", "%@: summarizing…"),
+        "cli.summary.privacy": Localized(
+            "Privacidade: remetente, assunto e as primeiras linhas de cada e-mail vão para a Groq.",
+            "Privacy: the sender, subject and first lines of each email are sent to Groq."),
 
         // purge.
         "cli.purge_warn": Localized(
@@ -105,16 +130,34 @@ enum CLIStrings {
         "cli.progress.scanning": Localized("Vasculhando %@…", "Scanning %@…"),
         "cli.progress.deleting": Localized("Apagando %@… (%d/%d)", "Deleting %@… (%d/%d)"),
 
+        // groq-key.
+        "cli.groq.prompt": Localized("Chave da API da Groq: ", "Groq API key: "),
+        "cli.groq.saved_ok": Localized("Chave da Groq salva.", "Groq key saved."),
+        "cli.groq.removed": Localized("Chave da Groq removida.", "Groq key removed."),
+        "cli.groq.no_key": Localized("Nenhuma chave recebida.", "No key received."),
+        "cli.groq.save_failed": Localized(
+            "Não deu para salvar a chave: %@", "Could not save the key: %@"),
+        "cli.groq.status": Localized("chave da Groq: %@", "Groq key: %@"),
+        "cli.groq.value_saved": Localized("salva", "saved"),
+        "cli.groq.value_none": Localized("nenhuma", "none"),
+        "cli.groq.ondevice_available": Localized(
+            "modelo local: disponível", "on-device model: available"),
+        "cli.groq.ondevice_unavailable": Localized(
+            "modelo local: %@", "on-device model: %@"),
+
         // set.
         "cli.set.max_age": Localized("idade máx.: %@", "max age: %@"),
+        "cli.set.disposable_age": Localized("idade descartável: %@", "disposable age: %@"),
+        "cli.set.kinds": Localized("tipos descartáveis: %@", "disposable kinds: %@"),
         "cli.set.keep_flagged": Localized("manter marcadas: %@", "keep flagged: %@"),
+        "cli.set.keep_important": Localized("manter importantes: %@", "keep important: %@"),
         "cli.set.permanent": Localized("permanente: %@", "permanent: %@"),
         "cli.set.enabled": Localized("ativo: %@", "enabled: %@"),
         "cli.set.excluded": Localized("excluídas: %@", "excluded: %@"),
         "cli.set.excluded_none": Localized("nenhuma", "none"),
         "cli.set.bad_age": Localized(
-            "idade inválida: %@ (use 30m, 12h, 1d ou 7d)",
-            "invalid max age: %@ (use 30m, 12h, 1d or 7d)"),
+            "idade inválida: %@ (use 15m, 12h, 3d ou 30d)",
+            "invalid age: %@ (use 15m, 12h, 3d or 30d)"),
         "cli.set.bad_on_off": Localized(
             "%@ deve ser 'on' ou 'off'.", "%@ must be 'on' or 'off'."),
 

@@ -3,15 +3,14 @@ import SwiftUI
 
 struct MainWindow: View {
     @EnvironmentObject private var store: AccountStore
+    @EnvironmentObject private var navigation: AppNavigation
     @ObservedObject private var l10n = L10n.shared
 
-    @State private var selection: SidebarItem = .general
     @State private var showingAdd = false
-    @State private var didBootstrap = false
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
+            List(selection: $navigation.sidebar) {
                 Section(l10n("app.accounts")) {
                     ForEach(store.accounts) { account in
                         VStack(alignment: .leading, spacing: 2) {
@@ -37,17 +36,17 @@ struct MainWindow: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    selection = .general
+                    navigation.sidebar = .general
                 } label: {
                     Label(l10n("app.general"), systemImage: "gearshape")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
                 .padding(10)
-                .background(selection == .general ? Color.accentColor.opacity(0.12) : Color.clear)
+                .background(navigation.sidebar == .general ? Color.accentColor.opacity(0.12) : Color.clear)
             }
         } detail: {
-            switch selection {
+            switch navigation.sidebar {
             case .account(let id):
                 AccountDetailView(accountID: id)
             case .general:
@@ -60,16 +59,10 @@ struct MainWindow: View {
         }
         .onAppear {
             store.reload()
-            if !didBootstrap {
-                didBootstrap = true
-                if let first = store.accounts.first {
-                    selection = .account(first.id)
-                }
-            }
         }
         .onChange(of: store.accounts.map(\.id)) { _, ids in
-            if case .account(let id) = selection, !ids.contains(id) {
-                selection = ids.first.map { .account($0) } ?? .general
+            if case .account(let id) = navigation.sidebar, !ids.contains(id) {
+                navigation.sidebar = ids.first.map { .account($0) } ?? .general
             }
         }
     }

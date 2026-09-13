@@ -20,10 +20,13 @@ enum CLI {
         case "add": return await add(args)
         case "remove": return remove(args)
         case "mailboxes": return await mailboxes(args)
+        case "inbox": return await inbox(args)
         case "scan": return await scan(args)
         case "run": return await runCleanup(args)
+        case "summary": return await summary(args)
         case "purge": return await purge(args)
         case "set": return setRule(args)
+        case "groq-key": return groqKey(args)
         case "lang": return lang(args)
         case "version":
             Terminal.out(EbbVersion.current)
@@ -49,8 +52,9 @@ enum CLI {
         }
         let headers = [
             t("cli.col.id"), t("cli.col.provider"), t("cli.col.username"),
-            t("cli.col.enabled"), t("cli.col.max_age"),
-            t("cli.col.keep_flagged"), t("cli.col.permanent"), t("cli.col.last_run"),
+            t("cli.col.enabled"), t("cli.col.max_age"), t("cli.col.disposable"),
+            t("cli.col.keep_flagged"), t("cli.col.keep_important"),
+            t("cli.col.permanent"), t("cli.col.last_run"),
         ]
         let rows = store.accounts.map { account in
             [
@@ -59,13 +63,25 @@ enum CLI {
                 account.username,
                 enabled(account.isEnabled),
                 Terminal.age(account.rule.maxAge),
+                disposable(account.rule),
                 enabled(account.rule.keepFlagged),
+                enabled(account.rule.keepImportant),
                 enabled(account.rule.permanent),
                 lastRun(account.lastRun),
             ]
         }
         Terminal.table(headers: headers, rows: rows)
         return 0
+    }
+
+    /// The disposable tier column: "1h codes,bulk", or "off" when it does not
+    /// apply (no kinds selected, or the short age is not shorter than maxAge).
+    private static func disposable(_ rule: CleanupRule) -> String {
+        let t = L10n.shared
+        guard rule.usesDisposableTier else { return t("cli.off") }
+        let kinds = rule.disposableKinds.sorted { $0.rawValue < $1.rawValue }
+            .map(\.rawValue).joined(separator: ",")
+        return "\(Terminal.age(rule.disposableAge)) \(kinds)"
     }
 
     private static func enabled(_ value: Bool) -> String {
@@ -207,6 +223,101 @@ enum CLI {
         return 0
     }
 
+    // MARK: inbox
+
+    /// Lists the newest Inbox messages per account. Read-only: never STARs,
+    /// never flags, never marks-as-read, never deletes.
+    static func inbox(_ args: [String]) async -> Int32 {
+        let t = L10n.shared
+        let parsed: ParsedArgs
+        switch parse(args, value: ["limit"], bool: []) {
+        case .success(let value): parsed = value
+        case .failure(let error): return flagError(error)
+        }
+        guard parsed.positionals.count <= 1 else { return usageHint("ebb inbox [<account>] [--limit 20]") }
+        var limit = 20
+        if let raw = parsed.values["limit"]?.last {
+            guard let value = Int(raw), value > 0 else {
+                Terminal.err(t("cli.inbox.limit_bad", raw))
+                return 2
+            }
+            limit = value
+        }
+
+        let store = AccountStore()
+        let targets: [Account]
+        if let query = parsed.positionals.first {
+            guard let account = store.account(matching: query) else {
+                Terminal.err(errorText(EbbError.accountNotFound(query)))
+                return 1
+            }
+            targets = [account]
+        } else {
+            targets = store.accounts.filter(\.isEnabled)
+        }
+        guard !targets.isEmpty else {
+            Terminal.out(t("cli.run_none"))
+            return 0
+        }
+
+        var failed = false
+        for account in targets {
+            guard let password = CredentialStore.password(for: account.id) else {
+                failed = true
+                Terminal.err(t("cli.account_error", account.username, errorText(EbbError.missingPassword)))
+                continue
+            }
+            let cleaner = Cleaner(account: account, password: password)
+            do {
+                let messages = try await cleaner.recentMessages(limit: limit)
+                Terminal.out(t("cli.scan_account", account.username))
+                inboxTable(messages: messages)
+            } catch {
+                failed = true
+                Terminal.err(t("cli.account_error", account.username, errorText(error)))
+            }
+        }
+        return failed ? 1 : 0
+    }
+
+    /// Relative age, kind (codes/bulk/-), flags (★ flagged, ! important), from,
+    /// subject. The row is trimmed to about 100 columns by truncating `from`
+    /// (cap 30) and the subject (whatever the grid leaves).
+    private static func inboxTable(messages: [DigestMessage], now: Date = Date()) {
+        let t = L10n.shared
+        let headers = [
+            t("cli.inbox.col.age"), t("cli.inbox.col.kind"), t("cli.inbox.col.flags"),
+            t("cli.inbox.col.from"), t("cli.inbox.col.subject"),
+        ]
+        let rows = messages.map { message in
+            var flags = ""
+            if message.flagged { flags += "★" }
+            if message.important { flags += "!" }
+            return [
+                Terminal.age(now.timeIntervalSince(message.date)),
+                message.kind?.rawValue ?? "-",
+                flags,
+                message.from,
+                message.subject,
+            ]
+        }
+        let all = [headers] + rows
+        var widths = headers.indices.map { column in
+            all.map { $0[column].count }.max() ?? 0
+        }
+        widths[3] = min(widths[3], 30)
+        let prefix = widths[0] + 2 + widths[1] + 2 + widths[2] + 2 + widths[3] + 2
+        let subjectWidth = max(10, 100 - prefix)
+        let visible = rows.map { row in
+            [
+                row[0], row[1], row[2],
+                Terminal.truncate(row[3], to: widths[3]),
+                Terminal.truncate(row[4], to: subjectWidth),
+            ]
+        }
+        Terminal.table(headers: headers, rows: visible)
+    }
+
     // MARK: scan
 
     static func scan(_ args: [String]) async -> Int32 {
@@ -302,6 +413,65 @@ enum CLI {
         return failed ? 1 : 0
     }
 
+    // MARK: summary
+
+    static func summary(_ args: [String]) async -> Int32 {
+        let t = L10n.shared
+        let parsed: ParsedArgs
+        switch parse(args, value: [], bool: []) {
+        case .success(let value): parsed = value
+        case .failure(let error): return flagError(error)
+        }
+        guard parsed.positionals.count <= 1 else { return usageHint("ebb summary [<account>]") }
+
+        guard let summarizer = SummaryEngine.preferred() else {
+            Terminal.err(errorText(EbbError.summaryUnavailable))
+            return 1
+        }
+        if summarizer is GroqSummarizer {
+            Terminal.err(t("cli.summary.privacy"))
+        }
+
+        let store = AccountStore()
+        let targets: [Account]
+        if let query = parsed.positionals.first {
+            guard let account = store.account(matching: query) else {
+                Terminal.err(errorText(EbbError.accountNotFound(query)))
+                return 1
+            }
+            targets = [account]
+        } else {
+            targets = store.accounts.filter(\.isEnabled)
+        }
+        guard !targets.isEmpty else {
+            Terminal.out(t("cli.run_none"))
+            return 0
+        }
+
+        var failed = false
+        for account in targets {
+            guard let password = CredentialStore.password(for: account.id) else {
+                failed = true
+                Terminal.err(t("cli.account_error", account.username, errorText(EbbError.missingPassword)))
+                continue
+            }
+            let cleaner = Cleaner(account: account, password: password)
+            Terminal.err(t("cli.summary.progress", account.username))
+            do {
+                let messages = try await cleaner.recentMessages(limit: 50)
+                let text = try await summarizer.summarize(
+                    messages, account: account.username, language: L10n.shared.resolved)
+                Terminal.out(t("cli.summary.header", account.username))
+                Terminal.out(text)
+                Terminal.out(t("cli.summary.footer", summarizer.displayName))
+            } catch {
+                failed = true
+                Terminal.err(t("cli.account_error", account.username, errorText(error)))
+            }
+        }
+        return failed ? 1 : 0
+    }
+
     // MARK: purge
 
     static func purge(_ args: [String]) async -> Int32 {
@@ -361,7 +531,10 @@ enum CLI {
         let parsed: ParsedArgs
         switch parse(
             Array(args.dropFirst()),
-            value: ["max-age", "keep-flagged", "permanent", "enabled", "exclude", "include"],
+            value: [
+                "max-age", "disposable-age", "keep-flagged", "keep-important", "codes", "bulk",
+                "permanent", "enabled", "exclude", "include",
+            ],
             bool: [])
         {
         case .success(let value): parsed = value
@@ -382,12 +555,40 @@ enum CLI {
             }
             rule.maxAge = interval
         }
+        if let raw = parsed.values["disposable-age"]?.last {
+            guard let interval = Terminal.parseAge(raw) else {
+                Terminal.err(t("cli.set.bad_age", raw))
+                return 2
+            }
+            rule.disposableAge = interval
+        }
+        if let raw = parsed.values["codes"]?.last {
+            guard let value = Terminal.yesNo(raw) else {
+                Terminal.err(t("cli.set.bad_on_off", "--codes"))
+                return 2
+            }
+            if value { rule.disposableKinds.insert(.codes) } else { rule.disposableKinds.remove(.codes) }
+        }
+        if let raw = parsed.values["bulk"]?.last {
+            guard let value = Terminal.yesNo(raw) else {
+                Terminal.err(t("cli.set.bad_on_off", "--bulk"))
+                return 2
+            }
+            if value { rule.disposableKinds.insert(.bulk) } else { rule.disposableKinds.remove(.bulk) }
+        }
         if let raw = parsed.values["keep-flagged"]?.last {
             guard let value = Terminal.yesNo(raw) else {
                 Terminal.err(t("cli.set.bad_on_off", "--keep-flagged"))
                 return 2
             }
             rule.keepFlagged = value
+        }
+        if let raw = parsed.values["keep-important"]?.last {
+            guard let value = Terminal.yesNo(raw) else {
+                Terminal.err(t("cli.set.bad_on_off", "--keep-important"))
+                return 2
+            }
+            rule.keepImportant = value
         }
         if let raw = parsed.values["permanent"]?.last {
             guard let value = Terminal.yesNo(raw) else {
@@ -420,7 +621,15 @@ enum CLI {
         }
 
         Terminal.out(t("cli.set.max_age", Terminal.age(account.rule.maxAge)))
+        Terminal.out(t("cli.set.disposable_age", Terminal.age(account.rule.disposableAge)))
+        let kinds =
+            account.rule.disposableKinds.isEmpty
+            ? t("cli.off")
+            : account.rule.disposableKinds.sorted { $0.rawValue < $1.rawValue }
+                .map(\.rawValue).joined(separator: ",")
+        Terminal.out(t("cli.set.kinds", kinds))
         Terminal.out(t("cli.set.keep_flagged", enabled(account.rule.keepFlagged)))
+        Terminal.out(t("cli.set.keep_important", enabled(account.rule.keepImportant)))
         Terminal.out(t("cli.set.permanent", enabled(account.rule.permanent)))
         Terminal.out(t("cli.set.enabled", enabled(account.isEnabled)))
         let excluded =
@@ -428,6 +637,48 @@ enum CLI {
             ? t("cli.set.excluded_none")
             : account.rule.excludedMailboxes.joined(separator: ", ")
         Terminal.out(t("cli.set.excluded", excluded))
+        return 0
+    }
+
+    // MARK: groq-key
+
+    static func groqKey(_ args: [String]) -> Int32 {
+        let t = L10n.shared
+        let parsed: ParsedArgs
+        switch parse(args, value: [], bool: ["status", "remove"]) {
+        case .success(let value): parsed = value
+        case .failure(let error): return flagError(error)
+        }
+        guard parsed.positionals.isEmpty else { return usageHint("ebb groq-key [--status|--remove]") }
+
+        if parsed.present.contains("status") {
+            let saved = SummaryEngine.groqKey().map { !$0.isEmpty } ?? false
+            Terminal.out(t("cli.groq.status", t(saved ? "cli.groq.value_saved" : "cli.groq.value_none")))
+            if let reason = SummaryEngine.onDeviceUnavailableReason {
+                Terminal.out(t("cli.groq.ondevice_unavailable", reason))
+            } else {
+                Terminal.out(t("cli.groq.ondevice_available"))
+            }
+            return 0
+        }
+
+        if parsed.present.contains("remove") {
+            SummaryEngine.removeGroqKey()
+            Terminal.out(t("cli.groq.removed"))
+            return 0
+        }
+
+        guard let key = Terminal.readPassword(prompt: t("cli.groq.prompt")), !key.isEmpty else {
+            Terminal.err(t("cli.groq.no_key"))
+            return 2
+        }
+        do {
+            try SummaryEngine.setGroqKey(key)
+        } catch {
+            Terminal.err(t("cli.groq.save_failed", errorText(error)))
+            return 1
+        }
+        Terminal.out(t("cli.groq.saved_ok"))
         return 0
     }
 
@@ -474,17 +725,22 @@ enum CLI {
         ),
         ("remove", ["ebb remove <account>"], "cli.cmd.remove"),
         ("mailboxes", ["ebb mailboxes <account>"], "cli.cmd.mailboxes"),
+        ("inbox", ["ebb inbox [<account>] [--limit 20]"], "cli.cmd.inbox"),
         ("scan", ["ebb scan [<account>] [--all]"], "cli.cmd.scan"),
         ("run", ["ebb run [<account>]"], "cli.cmd.run"),
+        ("summary", ["ebb summary [<account>]"], "cli.cmd.summary"),
         ("purge", ["ebb purge <account> [--yes-delete-everything]"], "cli.cmd.purge"),
         (
             "set",
             [
-                "ebb set <account> [--max-age 30m|12h|1d|7d] [--keep-flagged on|off]",
+                "ebb set <account> [--max-age 30m|12h|1d|3d|14d|30d]",
+                "         [--disposable-age 15m|1h|3h|12h] [--codes on|off] [--bulk on|off]",
+                "         [--keep-flagged on|off] [--keep-important on|off]",
                 "         [--permanent on|off] [--enabled on|off]",
                 "         [--exclude <mailbox>]... [--include <mailbox>]...",
             ], "cli.cmd.set"
         ),
+        ("groq-key", ["ebb groq-key [--status|--remove]"], "cli.cmd.groq_key"),
         ("lang", ["ebb lang [pt|en|system]"], "cli.cmd.lang"),
         ("version", ["ebb version"], "cli.cmd.version"),
         ("help", ["ebb help"], "cli.cmd.help"),

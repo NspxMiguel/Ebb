@@ -84,6 +84,12 @@ enum Terminal {
 
     // MARK: Values
 
+    /// Cuts a cell to at most `width` columns, appending "…" when it was longer.
+    static func truncate(_ text: String, to width: Int) -> String {
+        guard width > 0, text.count > width else { return text }
+        return String(text.prefix(max(0, width - 1))) + "…"
+    }
+
     /// The table value for the on/off flag tokens accepted by `ebb set`.
     static func yesNo(_ text: String) -> Bool? {
         switch text {
