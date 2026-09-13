@@ -26,6 +26,15 @@ enum CoreStrings {
             "O servidor não mostra a Lixeira. No Gmail: Configurações > Marcadores, marque \"Mostrar no IMAP\" na Lixeira.",
             "The server does not expose Trash. In Gmail: Settings > Labels, tick \"Show in IMAP\" for Trash."),
 
+        "error.summary_unavailable": Localized(
+            "Resumo indisponível: ligue o Apple Intelligence nos Ajustes do Mac ou salve uma chave da Groq.",
+            "Summary unavailable: turn on Apple Intelligence in System Settings or save a Groq key."),
+        "error.summary_failed": Localized("O resumo falhou: %@", "The summary failed: %@"),
+
+        "kind.codes": Localized("Códigos de verificação e login", "Verification and login codes"),
+        "kind.bulk": Localized(
+            "Newsletters, promoções e notificações em massa", "Newsletters, promotions and mass notifications"),
+
         "provider.gmail": Localized("Gmail", "Gmail"),
         "provider.icloud": Localized("iCloud Mail", "iCloud Mail"),
         "provider.custom": Localized("Outro servidor IMAP", "Other IMAP server"),

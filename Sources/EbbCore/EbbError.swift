@@ -17,6 +17,9 @@ public enum EbbError: Error, Equatable, LocalizedError, Sendable {
     /// The server lists no Trash mailbox (Gmail: "Show in IMAP" is off for Trash),
     /// so messages cannot be moved there or emptied from it.
     case trashNotFound
+    /// Neither Apple Intelligence nor a Groq key is available.
+    case summaryUnavailable
+    case summaryFailed(String)
 
     public var errorDescription: String? {
         let t = L10n.shared
@@ -30,6 +33,8 @@ public enum EbbError: Error, Equatable, LocalizedError, Sendable {
         case .missingPassword: return t("error.missing_password")
         case .accountNotFound(let name): return t("error.account_not_found", name)
         case .trashNotFound: return t("error.trash_not_found")
+        case .summaryUnavailable: return t("error.summary_unavailable")
+        case .summaryFailed(let detail): return t("error.summary_failed", detail)
         }
     }
 }

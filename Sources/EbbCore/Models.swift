@@ -28,13 +28,32 @@ public struct ServerEndpoint: Codable, Hashable, Sendable {
     }
 }
 
+/// Mail that is only worth anything for a short while.
+public enum DisposableKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// Verification, login and one-time codes.
+    case codes
+    /// Newsletters, promotions and mass notifications (List-Unsubscribe,
+    /// List-Id or Precedence: bulk/list/junk).
+    case bulk
+
+    public var id: String { rawValue }
+}
+
 /// What a cleanup is allowed to delete.
 public struct CleanupRule: Codable, Hashable, Sendable {
-    /// Messages whose INTERNALDATE (when the server received them) is older than
-    /// this are deleted by the automatic cleanup. Default: one day.
+    /// Everything that is not disposable is deleted once its INTERNALDATE (when
+    /// the server received it) is older than this. Default: one day.
     public var maxAge: TimeInterval
+    /// Messages of `disposableKinds` go sooner, after this age. Default: one hour.
+    /// Ignored when it is not shorter than `maxAge`.
+    public var disposableAge: TimeInterval
+    /// Which kinds count as disposable. Empty turns the short tier off.
+    public var disposableKinds: Set<DisposableKind>
     /// Starred (Gmail) / flagged (iCloud) messages are never deleted while on.
     public var keepFlagged: Bool
+    /// Messages Gmail marks as Important are never deleted while on. Other
+    /// servers have no such marker; there it changes nothing.
+    public var keepImportant: Bool
     /// true: messages are gone for good (Trash is emptied too).
     /// false: messages only go to Trash, where the provider's own retention applies.
     public var permanent: Bool
@@ -44,17 +63,42 @@ public struct CleanupRule: Codable, Hashable, Sendable {
 
     public init(
         maxAge: TimeInterval = 86_400,
+        disposableAge: TimeInterval = 3_600,
+        disposableKinds: Set<DisposableKind> = [.codes, .bulk],
         keepFlagged: Bool = true,
+        keepImportant: Bool = true,
         permanent: Bool = true,
         excludedMailboxes: [String] = []
     ) {
         self.maxAge = maxAge
+        self.disposableAge = disposableAge
+        self.disposableKinds = disposableKinds
         self.keepFlagged = keepFlagged
+        self.keepImportant = keepImportant
         self.permanent = permanent
         self.excludedMailboxes = excludedMailboxes
     }
 
     public static let `default` = CleanupRule()
+
+    /// Whether the short tier applies at all.
+    public var usesDisposableTier: Bool {
+        !disposableKinds.isEmpty && disposableAge < maxAge
+    }
+
+    // Accounts saved before a field existed keep decoding, with the default.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = CleanupRule()
+        maxAge = try c.decodeIfPresent(TimeInterval.self, forKey: .maxAge) ?? fallback.maxAge
+        disposableAge = try c.decodeIfPresent(TimeInterval.self, forKey: .disposableAge) ?? fallback.disposableAge
+        disposableKinds =
+            try c.decodeIfPresent(Set<DisposableKind>.self, forKey: .disposableKinds) ?? fallback.disposableKinds
+        keepFlagged = try c.decodeIfPresent(Bool.self, forKey: .keepFlagged) ?? fallback.keepFlagged
+        keepImportant = try c.decodeIfPresent(Bool.self, forKey: .keepImportant) ?? fallback.keepImportant
+        permanent = try c.decodeIfPresent(Bool.self, forKey: .permanent) ?? fallback.permanent
+        excludedMailboxes = try c.decodeIfPresent([String].self, forKey: .excludedMailboxes) ?? []
+    }
 }
 
 /// Outcome of the last cleanup of an account, persisted with the account.
