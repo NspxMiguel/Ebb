@@ -30,7 +30,10 @@ public enum Runner {
         for account in targets {
             var summary: RunSummary
             if let password = passwordLookup(account.id) {
-                let cleaner = Cleaner(account: account, password: password)
+                var cleaner = Cleaner(account: account, password: password)
+                if account.rule.aiTriage {
+                    cleaner.triager = SummaryEngine.preferredTriager()
+                }
                 let id = account.id
                 do {
                     summary = try await cleaner.run(

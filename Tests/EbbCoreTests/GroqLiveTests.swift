@@ -32,4 +32,29 @@ final class GroqLiveTests: XCTestCase {
         XCTAssertTrue(summary.localizedCaseInsensitiveContains("contrato"))
         XCTAssertFalse(summary.contains("482913"), "verification codes must not be repeated")
     }
+
+    func testTriageMarksCodesAndPromotionsButKeepsPeople() async throws {
+        guard let key = ProcessInfo.processInfo.environment["EBB_GROQ_API_KEY"], !key.isEmpty else {
+            throw XCTSkip("EBB_GROQ_API_KEY not set")
+        }
+        let now = Date()
+        func message(_ uid: UInt32, _ from: String, _ subject: String, _ snippet: String) -> DigestMessage {
+            DigestMessage(
+                uid: uid, date: now.addingTimeInterval(-7200), from: from, subject: subject, snippet: snippet,
+                kind: nil, flagged: false, important: false)
+        }
+        let messages = [
+            message(10, "Ana Souza <ana@example.com>", "Almoço amanhã?", "Consegue às 12h30? Me avisa."),
+            message(11, "Bank <no-reply@bank.example>", "Sua fatura vence dia 20", "Valor R$ 1.240,00."),
+            message(12, "Social <notify@social.example>", "3 pessoas curtiram sua foto", "Veja quem curtiu."),
+            message(13, "Store <deals@store.example>", "Só hoje: 40% off", "Aproveite as ofertas."),
+            message(14, "Delivery <no-reply@post.example>", "Seu pedido saiu para entrega", "Chega hoje até 18h."),
+        ]
+        let disposable = try await GroqSummarizer(apiKey: key).disposable(messages, account: "t@example.com")
+        print("GROQ TRIAGE disposable UIDs:", disposable.sorted())
+        XCTAssertFalse(disposable.contains(10), "a person writing must be kept")
+        XCTAssertFalse(disposable.contains(11), "bills must be kept")
+        XCTAssertFalse(disposable.contains(14), "deliveries must be kept")
+        XCTAssertTrue(disposable.contains(13), "promotions are disposable")
+    }
 }

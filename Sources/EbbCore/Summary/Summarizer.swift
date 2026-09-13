@@ -27,6 +27,14 @@ public struct GroqSummarizer: Summarizer {
 
     public func summarize(_ messages: [DigestMessage], account: String, language: Language) async throws -> String {
         let resolved = language == .system ? L10n.shared.resolved : language
+        return try await complete(
+            system: SummaryPrompt.instructions(account: account, language: resolved),
+            user: SummaryPrompt.messageList(messages, snippetLimit: 400),
+            maxTokens: 1500,
+            json: false)
+    }
+
+    func complete(system: String, user: String, maxTokens: Int, json: Bool) async throws -> String {
         var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 90
@@ -34,15 +42,16 @@ public struct GroqSummarizer: Summarizer {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Groq's edge answers 403 to requests without a User-Agent.
         request.setValue("Ebb/\(EbbVersion.current)", forHTTPHeaderField: "User-Agent")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
-            "temperature": 0.2,
-            "max_completion_tokens": 1500,
+            "temperature": json ? 0 : 0.2,
+            "max_completion_tokens": maxTokens,
             "messages": [
-                ["role": "system", "content": SummaryPrompt.instructions(account: account, language: resolved)],
-                ["role": "user", "content": SummaryPrompt.messageList(messages, snippetLimit: 400)],
+                ["role": "system", "content": system],
+                ["role": "user", "content": user],
             ],
         ]
+        if json { body["response_format"] = ["type": "json_object"] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response): (Data, URLResponse)
@@ -52,12 +61,12 @@ public struct GroqSummarizer: Summarizer {
             throw EbbError.summaryFailed(error.localizedDescription)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard status == 200 else {
-            let message = ((json?["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(status)"
+            let message = ((object?["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(status)"
             throw EbbError.summaryFailed(message)
         }
-        guard let choices = json?["choices"] as? [[String: Any]],
+        guard let choices = object?["choices"] as? [[String: Any]],
             let content = (choices.first?["message"] as? [String: Any])?["content"] as? String,
             !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {

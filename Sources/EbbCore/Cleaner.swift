@@ -17,6 +17,11 @@ public struct Cleaner: Sendable {
     let password: String
     /// Seconds to wait for any single server response.
     public var responseTimeout: TimeInterval = 120
+    /// Consulted only when `account.rule.aiTriage` is on. `Runner` fills it from
+    /// `SummaryEngine.preferredTriager()`.
+    public var triager: MailTriager?
+    /// Where AI verdicts are remembered between runs.
+    public var triageCacheURL: URL = TriageCache.defaultURL
 
     public init(account: Account, password: String) {
         self.account = account
@@ -37,10 +42,12 @@ public struct Cleaner: Sendable {
     public func plan(mode: CleanupMode, now: Date = Date()) async throws -> CleanupPlan {
         try await withSession { client in
             let cutoff = cutoffDate(mode: mode, now: now)
+            let context = RunContext(cleaner: self)
+            defer { context.finish(now: now) }
             let boxes = try await client.list()
             var plans: [MailboxPlan] = []
             for box in targets(in: boxes, client: client) {
-                let uids = try await candidates(in: box, client: client, mode: mode, now: now)
+                let uids = try await candidates(in: box, client: client, mode: mode, now: now, context: context)
                 plans.append(MailboxPlan(mailbox: box, uids: uids))
             }
             return CleanupPlan(mode: mode, cutoff: cutoff, mailboxes: plans)
@@ -57,20 +64,22 @@ public struct Cleaner: Sendable {
     ) async throws -> RunSummary {
         progress?(.connecting)
         let summary = try await withSession { client -> RunSummary in
+            let context = RunContext(cleaner: self)
+            defer { context.finish(now: now) }
             let boxes = try await client.list()
             var tally = Tally()
             if client.isGmail {
                 try await runGmail(
                     client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
-                    tally: &tally, progress: progress)
+                    context: context, tally: &tally, progress: progress)
             } else {
                 try await runFolders(
                     client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
-                    tally: &tally, progress: progress)
+                    context: context, tally: &tally, progress: progress)
             }
             return RunSummary(
                 date: now, mode: mode, dryRun: dryRun, deleted: tally.deleted, pending: tally.pending,
-                mailboxesTouched: tally.touched)
+                mailboxesTouched: tally.touched, warning: context.warning)
         }
         progress?(.finished(summary))
         return summary
@@ -88,7 +97,7 @@ public struct Cleaner: Sendable {
 
     private func runGmail(
         client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, now: Date, dryRun: Bool,
-        tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
+        context: RunContext, tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
     ) async throws {
         let trash = boxes.first { $0.role == .trash && $0.selectable }
         let selected = targets(in: boxes, client: client)
@@ -96,7 +105,7 @@ public struct Cleaner: Sendable {
 
         for box in selected where box.role != .trash {
             progress?(.scanning(mailbox: box.displayName))
-            let uids = try await candidates(in: box, client: client, mode: mode, now: now)
+            let uids = try await candidates(in: box, client: client, mode: mode, now: now, context: context)
             guard !uids.isEmpty else { continue }
             tally.touched += 1
             if dryRun {
@@ -126,7 +135,7 @@ public struct Cleaner: Sendable {
         // Moved messages keep their INTERNALDATE, so the same criteria find them
         // in Trash together with whatever old mail was already there.
         progress?(.scanning(mailbox: trash.displayName))
-        let uids = try await candidates(in: trash, client: client, mode: mode, now: now)
+        let uids = try await candidates(in: trash, client: client, mode: mode, now: now, context: context)
         if dryRun {
             if !uids.isEmpty { tally.touched += 1 }
             tally.deleted += uids.count
@@ -145,12 +154,12 @@ public struct Cleaner: Sendable {
 
     private func runFolders(
         client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, now: Date, dryRun: Bool,
-        tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
+        context: RunContext, tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
     ) async throws {
         let trash = boxes.first { $0.role == .trash && $0.selectable }
         for box in targets(in: boxes, client: client) {
             progress?(.scanning(mailbox: box.displayName))
-            let uids = try await candidates(in: box, client: client, mode: mode, now: now)
+            let uids = try await candidates(in: box, client: client, mode: mode, now: now, context: context)
             guard !uids.isEmpty else { continue }
             tally.touched += 1
             if dryRun {
@@ -239,7 +248,7 @@ public struct Cleaner: Sendable {
     }
 
     private func candidates(
-        in box: MailboxInfo, client: IMAPClient, mode: CleanupMode, now: Date
+        in box: MailboxInfo, client: IMAPClient, mode: CleanupMode, now: Date, context: RunContext
     ) async throws -> [UInt32] {
         let exists = try await client.select(box.rawName)
         guard exists > 0 else { return [] }
@@ -287,13 +296,85 @@ public struct Cleaner: Sendable {
         // Only messages in the window between the two ages need their headers
         // read, which keeps an hourly run cheap on a big mailbox.
         let fetched = try await client.fetchMessages(needsHeaders, labels: false, headers: true)
-        let disposable = needsHeaders.filter { uid in
-            guard let raw = fetched[uid]?.rawHeaders,
-                let kind = MessageClassifier.kind(of: MessageHeaders.parse(raw))
-            else { return false }
-            return rule.disposableKinds.contains(kind)
+        var disposable = Set(
+            needsHeaders.filter { uid in
+                guard let raw = fetched[uid]?.rawHeaders,
+                    let kind = MessageClassifier.kind(of: MessageHeaders.parse(raw))
+                else { return false }
+                return rule.disposableKinds.contains(kind)
+            })
+        if rule.aiTriage {
+            let undecided = needsHeaders.filter { !disposable.contains($0) }
+            disposable.formUnion(
+                try await triage(
+                    undecided, in: box, headers: fetched.compactMapValues(\.rawHeaders), client: client,
+                    now: now, context: context))
         }
         return (sure + disposable).sorted()
+    }
+
+    /// Asks the model about messages the header rules left undecided. Verdicts
+    /// are cached by Message-ID; a failure keeps every message it did not judge
+    /// and leaves a warning on the run.
+    private func triage(
+        _ uids: [UInt32], in box: MailboxInfo, headers: [UInt32: String], client: IMAPClient, now: Date,
+        context: RunContext
+    ) async throws -> Set<UInt32> {
+        guard !uids.isEmpty else { return [] }
+        guard let triager else {
+            context.warning = L10n.shared("warning.triage_unavailable")
+            return []
+        }
+        var result: Set<UInt32> = []
+        var unknown: [UInt32] = []
+        var keys: [UInt32: String] = [:]
+        for uid in uids {
+            let key = Self.triageKey(account: account.id, rawHeaders: headers[uid], mailbox: box.rawName, uid: uid)
+            keys[uid] = key
+            switch context.cache[key] {
+            case .some(true): result.insert(uid)
+            case .some(false): break
+            case .none: unknown.append(uid)
+            }
+        }
+        guard !unknown.isEmpty, context.warning == nil else { return result }
+
+        let fetched = try await client.fetchMessages(unknown, labels: false, headers: true, bodyBytes: 2048)
+        let messages: [DigestMessage] = unknown.compactMap { uid in
+            guard let message = fetched[uid] else { return nil }
+            let parsed = MessageHeaders.parse(message.rawHeaders ?? "")
+            return DigestMessage(
+                uid: uid, date: message.meta.internalDate, from: parsed.from, subject: parsed.subject,
+                snippet: MailText.snippet(body: message.rawBody ?? "", headers: parsed, limit: 300),
+                kind: nil, flagged: false, important: false)
+        }
+        for start in stride(from: 0, to: messages.count, by: 25) {
+            let batch = Array(messages[start..<min(start + 25, messages.count)])
+            do {
+                let verdict = try await triager.disposable(batch, account: account.username)
+                for message in batch {
+                    let isDisposable = verdict.contains(message.uid)
+                    if let key = keys[message.uid] { context.cache.record(key, disposable: isDisposable, now: now) }
+                    if isDisposable { result.insert(message.uid) }
+                }
+            } catch {
+                let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                context.warning = L10n.shared("warning.triage_failed", detail)
+                break
+            }
+        }
+        return result
+    }
+
+    static func triageKey(account: UUID, rawHeaders: String?, mailbox: String, uid: UInt32) -> String {
+        if let raw = rawHeaders {
+            let unfolded = raw.replacingOccurrences(of: "\r\n", with: "\n")
+            for line in unfolded.split(separator: "\n") where line.lowercased().hasPrefix("message-id:") {
+                let id = line.dropFirst("message-id:".count).trimmingCharacters(in: .whitespaces)
+                if !id.isEmpty { return "\(account.uuidString)|\(id)" }
+            }
+        }
+        return "\(account.uuidString)|\(mailbox)|\(uid)"
     }
 
     private func isProtected(_ message: MessageMeta) -> Bool {
@@ -301,6 +382,22 @@ public struct Cleaner: Sendable {
         if rule.keepFlagged && message.flags.contains("\\FLAGGED") { return true }
         if rule.keepImportant && message.labels.contains("\\IMPORTANT") { return true }
         return false
+    }
+
+    /// State shared by the mailboxes of one run.
+    final class RunContext {
+        let cache: TriageCache
+        var warning: String?
+        private let usesCache: Bool
+
+        init(cleaner: Cleaner) {
+            usesCache = cleaner.account.rule.aiTriage
+            cache = TriageCache(fileURL: cleaner.triageCacheURL)
+        }
+
+        func finish(now: Date) {
+            if usesCache { cache.save(now: now) }
+        }
     }
 
     private func cutoffDate(mode: CleanupMode, now: Date) -> Date? {

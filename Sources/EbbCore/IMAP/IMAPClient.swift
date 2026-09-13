@@ -132,7 +132,7 @@ final class IMAPClient {
 
     /// Header fields the classifier and the digest need; one request covers both.
     static let headerFields =
-        "FROM SUBJECT DATE LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
+        "FROM SUBJECT DATE MESSAGE-ID LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
 
     struct FetchedMessage {
         var meta: MessageMeta

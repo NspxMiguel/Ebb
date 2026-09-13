@@ -57,6 +57,11 @@ public struct CleanupRule: Codable, Hashable, Sendable {
     /// true: messages are gone for good (Trash is emptied too).
     /// false: messages only go to Trash, where the provider's own retention applies.
     public var permanent: Bool
+    /// Ask a language model (Apple's on-device one, or Groq with a saved key)
+    /// about messages between the two ages that the header rules did not mark
+    /// disposable. Off by default: with Groq, sender, subject and the first lines
+    /// of those messages leave the Mac. Any failure keeps the message.
+    public var aiTriage: Bool
     /// Raw IMAP mailbox names (as LIST returns them) the cleanup never touches.
     /// Drafts are always skipped regardless of this list.
     public var excludedMailboxes: [String]
@@ -68,6 +73,7 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         keepFlagged: Bool = true,
         keepImportant: Bool = true,
         permanent: Bool = true,
+        aiTriage: Bool = false,
         excludedMailboxes: [String] = []
     ) {
         self.maxAge = maxAge
@@ -76,6 +82,7 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         self.keepFlagged = keepFlagged
         self.keepImportant = keepImportant
         self.permanent = permanent
+        self.aiTriage = aiTriage
         self.excludedMailboxes = excludedMailboxes
     }
 
@@ -97,6 +104,7 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         keepFlagged = try c.decodeIfPresent(Bool.self, forKey: .keepFlagged) ?? fallback.keepFlagged
         keepImportant = try c.decodeIfPresent(Bool.self, forKey: .keepImportant) ?? fallback.keepImportant
         permanent = try c.decodeIfPresent(Bool.self, forKey: .permanent) ?? fallback.permanent
+        aiTriage = try c.decodeIfPresent(Bool.self, forKey: .aiTriage) ?? fallback.aiTriage
         excludedMailboxes = try c.decodeIfPresent([String].self, forKey: .excludedMailboxes) ?? []
     }
 }
@@ -114,6 +122,9 @@ public struct RunSummary: Codable, Hashable, Sendable {
     public var mailboxesTouched: Int
     /// Localized error text when the run failed; nil on success.
     public var errorMessage: String?
+    /// Localized note about something that degraded without failing the run,
+    /// e.g. the AI triage could not be reached and messages were kept.
+    public var warning: String?
 
     public init(
         date: Date = Date(),
@@ -122,7 +133,8 @@ public struct RunSummary: Codable, Hashable, Sendable {
         deleted: Int = 0,
         pending: Int = 0,
         mailboxesTouched: Int = 0,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        warning: String? = nil
     ) {
         self.date = date
         self.mode = mode
@@ -131,6 +143,7 @@ public struct RunSummary: Codable, Hashable, Sendable {
         self.pending = pending
         self.mailboxesTouched = mailboxesTouched
         self.errorMessage = errorMessage
+        self.warning = warning
     }
 
     public var succeeded: Bool { errorMessage == nil }

@@ -31,6 +31,13 @@ enum CoreStrings {
             "Summary unavailable: turn on Apple Intelligence in System Settings or save a Groq key."),
         "error.summary_failed": Localized("O resumo falhou: %@", "The summary failed: %@"),
 
+        "warning.triage_unavailable": Localized(
+            "Triagem por IA ligada, mas sem Apple Intelligence nem chave da Groq: só as regras de cabeçalho valeram.",
+            "AI triage is on, but there is no Apple Intelligence and no Groq key: only the header rules applied."),
+        "warning.triage_failed": Localized(
+            "A triagem por IA falhou e os e-mails em dúvida foram mantidos: %@",
+            "AI triage failed and undecided messages were kept: %@"),
+
         "summary.on_device": Localized("Apple Intelligence neste Mac", "Apple Intelligence on this Mac"),
         "summary.reason.not_enabled": Localized(
             "O Apple Intelligence está desligado nos Ajustes do Mac.",
