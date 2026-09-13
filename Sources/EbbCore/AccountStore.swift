@@ -9,7 +9,12 @@ public final class AccountStore: ObservableObject {
 
     public let fileURL: URL
 
+    /// EBB_ACCOUNTS_FILE points both the app and the CLI at another accounts
+    /// file — for trying things out without touching the real one.
     public nonisolated static var defaultFileURL: URL {
+        if let override = ProcessInfo.processInfo.environment["EBB_ACCOUNTS_FILE"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
         let base =
             FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")

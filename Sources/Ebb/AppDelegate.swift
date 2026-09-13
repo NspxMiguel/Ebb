@@ -42,6 +42,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !launchedAsLoginItem {
             showMainWindow()
         }
+        if let directory = ProcessInfo.processInfo.environment["EBB_SNAPSHOT_DIR"], !directory.isEmpty {
+            snapshotAndQuit(to: URL(fileURLWithPath: directory))
+        }
+    }
+
+    /// Developer aid (EBB_SNAPSHOT_DIR): writes the main window to main.png and
+    /// quits, so the interface can be checked and screenshotted from a script.
+    private func snapshotAndQuit(to directory: URL) {
+        showMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            // A process may capture its own windows without Screen Recording
+            // permission; cacheDisplay would miss SwiftUI's layer content.
+            if let window = self?.mainWindow,
+                let image = CGWindowListCreateImage(
+                    .null, .optionIncludingWindow, CGWindowID(window.windowNumber),
+                    [.boundsIgnoreFraming, .bestResolution])
+            {
+                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
+                    .write(to: directory.appendingPathComponent("main.png"))
+            }
+            NSApp.terminate(nil)
+        }
     }
 
     /// Opening the app again while it runs lands here.
