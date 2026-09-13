@@ -36,10 +36,16 @@ public final class AccountStore: ObservableObject {
         accounts.first { $0.id == id }
     }
 
-    /// Matches by id string or, case-insensitively, by username.
+    /// Matches by id, by an unambiguous id prefix of at least 8 characters (the
+    /// short id `ebb accounts` prints) or, case-insensitively, by username.
     public func account(matching query: String) -> Account? {
         if let id = UUID(uuidString: query), let found = account(id: id) { return found }
-        return accounts.first { $0.username.caseInsensitiveCompare(query) == .orderedSame }
+        if let found = accounts.first(where: { $0.username.caseInsensitiveCompare(query) == .orderedSame }) {
+            return found
+        }
+        guard query.count >= 8 else { return nil }
+        let prefixed = accounts.filter { $0.id.uuidString.lowercased().hasPrefix(query.lowercased()) }
+        return prefixed.count == 1 ? prefixed[0] : nil
     }
 
     public func add(_ account: Account) throws {

@@ -1,4 +1,8 @@
-// Placeholder: the ebb command line tool is built on top of EbbCore.
 import EbbCore
+import Foundation
 
-print("ebb")
+// The CLI owns its translation table; register it before anything else renders.
+L10n.shared.register(CLIStrings.table)
+
+let status = await CLI.run(arguments: Array(CommandLine.arguments.dropFirst()))
+exit(status)
