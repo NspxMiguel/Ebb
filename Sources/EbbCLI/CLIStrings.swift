@@ -166,5 +166,6 @@ enum CLIStrings {
         "cli.lang_bad": Localized(
             "idioma inválido: %@ (use pt, en ou system)",
             "invalid language: %@ (use pt, en or system)"),
-    ]
+        "cli.set.ai": Localized("triagem por IA: %@", "AI triage: %@"),
+]
 }

@@ -532,7 +532,7 @@ enum CLI {
         switch parse(
             Array(args.dropFirst()),
             value: [
-                "max-age", "disposable-age", "keep-flagged", "keep-important", "codes", "bulk",
+                "max-age", "disposable-age", "keep-flagged", "keep-important", "ai", "codes", "bulk",
                 "permanent", "enabled", "exclude", "include",
             ],
             bool: [])
@@ -590,6 +590,13 @@ enum CLI {
             }
             rule.keepImportant = value
         }
+        if let raw = parsed.values["ai"]?.last {
+            guard let value = Terminal.yesNo(raw) else {
+                Terminal.err(t("cli.set.bad_on_off", "--ai"))
+                return 2
+            }
+            rule.aiTriage = value
+        }
         if let raw = parsed.values["permanent"]?.last {
             guard let value = Terminal.yesNo(raw) else {
                 Terminal.err(t("cli.set.bad_on_off", "--permanent"))
@@ -630,6 +637,7 @@ enum CLI {
         Terminal.out(t("cli.set.kinds", kinds))
         Terminal.out(t("cli.set.keep_flagged", enabled(account.rule.keepFlagged)))
         Terminal.out(t("cli.set.keep_important", enabled(account.rule.keepImportant)))
+        Terminal.out(t("cli.set.ai", enabled(account.rule.aiTriage)))
         Terminal.out(t("cli.set.permanent", enabled(account.rule.permanent)))
         Terminal.out(t("cli.set.enabled", enabled(account.isEnabled)))
         let excluded =
@@ -735,7 +743,7 @@ enum CLI {
             [
                 "ebb set <account> [--max-age 30m|12h|1d|3d|14d|30d]",
                 "         [--disposable-age 15m|1h|3h|12h] [--codes on|off] [--bulk on|off]",
-                "         [--keep-flagged on|off] [--keep-important on|off]",
+                "         [--keep-flagged on|off] [--keep-important on|off] [--ai on|off]",
                 "         [--permanent on|off] [--enabled on|off]",
                 "         [--exclude <mailbox>]... [--include <mailbox>]...",
             ], "cli.cmd.set"
