@@ -22,6 +22,9 @@ enum CoreStrings {
             "Sem senha de app salva para esta conta.", "No app password saved for this account."),
         "error.account_not_found": Localized(
             "Conta não encontrada: %@", "Account not found: %@"),
+        "error.trash_not_found": Localized(
+            "O servidor não mostra a Lixeira. No Gmail: Configurações > Marcadores, marque \"Mostrar no IMAP\" na Lixeira.",
+            "The server does not expose Trash. In Gmail: Settings > Labels, tick \"Show in IMAP\" for Trash."),
 
         "provider.gmail": Localized("Gmail", "Gmail"),
         "provider.icloud": Localized("iCloud Mail", "iCloud Mail"),

@@ -14,6 +14,9 @@ public enum EbbError: Error, Equatable, LocalizedError, Sendable {
     case timeout
     case missingPassword
     case accountNotFound(String)
+    /// The server lists no Trash mailbox (Gmail: "Show in IMAP" is off for Trash),
+    /// so messages cannot be moved there or emptied from it.
+    case trashNotFound
 
     public var errorDescription: String? {
         let t = L10n.shared
@@ -26,6 +29,7 @@ public enum EbbError: Error, Equatable, LocalizedError, Sendable {
         case .timeout: return t("error.timeout")
         case .missingPassword: return t("error.missing_password")
         case .accountNotFound(let name): return t("error.account_not_found", name)
+        case .trashNotFound: return t("error.trash_not_found")
         }
     }
 }

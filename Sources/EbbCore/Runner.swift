@@ -35,7 +35,7 @@ public enum Runner {
                 do {
                     summary = try await cleaner.run(
                         mode: mode, dryRun: dryRun, now: now,
-                        progress: progress.map { callback in { event in callback(id, event) } })
+                        progress: progress.map { callback in { @Sendable event in callback(id, event) } })
                 } catch {
                     summary = RunSummary(
                         date: now, mode: mode, dryRun: dryRun,
