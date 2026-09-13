@@ -92,3 +92,16 @@ final class IMAPParserTests: XCTestCase {
         XCTAssertEqual(CredentialStore.normalize("abcd efgh ijkl mnop"), "abcdefghijklmnop")
     }
 }
+
+final class MailboxRoleTests: XCTestCase {
+    func testNameGuessNeverOverridesAFlaggedMailbox() {
+        let boxes = IMAPClient.mailboxes(from: [
+            (name: "INBOX", flags: []),
+            (name: "Itens Exclu&AO0-dos", flags: []),
+            (name: "Deleted Messages", flags: [#"\TRASH"#]),
+            (name: "Sent", flags: []),
+        ])
+        XCTAssertEqual(boxes.map(\.role), [.inbox, .other, .trash, .sent])
+        XCTAssertEqual(boxes[1].displayName, "Itens Excluídos")
+    }
+}

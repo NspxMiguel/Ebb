@@ -73,15 +73,31 @@ final class IMAPClient {
 
     func list() async throws -> [MailboxInfo] {
         let lines = try await command(#"LIST "" "*""#)
-        return lines.compactMap { line in
-            guard let entry = IMAPParser.listEntry(line) else { return nil }
-            let flags = Set(entry.flags.map { $0.uppercased() })
+        let entries = lines.compactMap(IMAPParser.listEntry).map {
+            (name: $0.name, flags: Set($0.flags.map { $0.uppercased() }))
+        }
+        return Self.mailboxes(from: entries)
+    }
+
+    /// Roles from SPECIAL-USE flags first. A name only decides a role that no
+    /// flagged mailbox already claims: with iCloud's "Deleted Messages" flagged
+    /// \Trash, a user folder called "Itens Excluídos" is just a folder, and
+    /// guessing otherwise would pick the wrong Trash.
+    static func mailboxes(from entries: [(name: String, flags: Set<String>)]) -> [MailboxInfo] {
+        let flagged = entries.map { role(flags: $0.flags, name: nil) }
+        let claimed = Set(flagged.filter { $0 != .other && $0 != .inbox })
+        return zip(entries, flagged).map { entry, flagRole in
             let display = ModifiedUTF7.decode(entry.name)
+            var detected = flagRole
+            if detected == .other {
+                let guess = role(flags: [], name: display)
+                detected = claimed.contains(guess) ? .other : guess
+            }
             return MailboxInfo(
                 rawName: entry.name,
                 displayName: display,
-                role: Self.role(flags: flags, name: display),
-                selectable: !flags.contains("\\NOSELECT") && !flags.contains("\\NONEXISTENT")
+                role: detected,
+                selectable: !entry.flags.contains("\\NOSELECT") && !entry.flags.contains("\\NONEXISTENT")
             )
         }
     }
@@ -226,7 +242,8 @@ final class IMAPClient {
     ]
 
     /// SPECIAL-USE flags first; when a server does not send them, the name decides.
-    static func role(flags: Set<String>, name: String) -> MailboxRole {
+    /// With `name == nil` only the flags are looked at.
+    static func role(flags: Set<String>, name: String?) -> MailboxRole {
         let byFlag: [(String, MailboxRole)] = [
             ("\\ALL", .all), ("\\ARCHIVE", .archive), ("\\DRAFTS", .drafts),
             ("\\JUNK", .junk), ("\\SENT", .sent), ("\\TRASH", .trash),
@@ -234,6 +251,7 @@ final class IMAPClient {
         for (flag, role) in byFlag where flags.contains(flag) {
             return role
         }
+        guard let name else { return .other }
         if name.uppercased() == "INBOX" { return .inbox }
         let lowered = name.lowercased()
         let leaf = lowered.split(separator: "/").last.map(String.init) ?? lowered
