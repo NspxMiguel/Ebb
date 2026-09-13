@@ -127,10 +127,31 @@ final class IMAPClient {
     }
 
     func fetchMeta(_ uids: [UInt32], labels: Bool) async throws -> [UInt32: MessageMeta] {
-        var result: [UInt32: MessageMeta] = [:]
-        let items = labels ? "(UID INTERNALDATE FLAGS X-GM-LABELS)" : "(UID INTERNALDATE FLAGS)"
-        for chunk in UIDSet.chunks(uids) {
-            let lines = try await command("UID FETCH \(UIDSet.string(from: chunk)) \(items)")
+        try await fetchMessages(uids, labels: labels, headers: false).mapValues(\.meta)
+    }
+
+    /// Header fields the classifier and the digest need; one request covers both.
+    static let headerFields =
+        "FROM SUBJECT DATE LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
+
+    struct FetchedMessage {
+        var meta: MessageMeta
+        var rawHeaders: String?
+        var rawBody: String?
+    }
+
+    /// Dates, flags, (Gmail) labels, and optionally the header fields above and
+    /// the first `bodyBytes` of the body. BODY.PEEK: nothing is marked as read.
+    func fetchMessages(
+        _ uids: [UInt32], labels: Bool, headers: Bool, bodyBytes: Int? = nil
+    ) async throws -> [UInt32: FetchedMessage] {
+        var items = ["UID", "INTERNALDATE", "FLAGS"]
+        if labels { items.append("X-GM-LABELS") }
+        if headers { items.append("BODY.PEEK[HEADER.FIELDS (\(Self.headerFields))]") }
+        if let bodyBytes { items.append("BODY.PEEK[TEXT]<0.\(bodyBytes)>") }
+        var result: [UInt32: FetchedMessage] = [:]
+        for chunk in UIDSet.chunks(uids, size: headers ? 100 : 500) {
+            let lines = try await command("UID FETCH \(UIDSet.string(from: chunk)) (\(items.joined(separator: " ")))")
             for line in lines {
                 guard let attributes = IMAPParser.fetchAttributes(line),
                     let uid = attributes["UID"]?.text.flatMap(UInt32.init),
@@ -139,7 +160,12 @@ final class IMAPClient {
                 else { continue }
                 let flags = Set((attributes["FLAGS"]?.items ?? []).compactMap { $0.text?.uppercased() })
                 let gmLabels = Set((attributes["X-GM-LABELS"]?.items ?? []).compactMap { $0.text?.uppercased() })
-                result[uid] = MessageMeta(internalDate: date, flags: flags, labels: gmLabels)
+                // Section names come back as sent minus ".PEEK", e.g. BODY[TEXT]<0>.
+                let rawHeaders = attributes.first { $0.key.hasPrefix("BODY[HEADER") }?.value.text
+                let rawBody = attributes.first { $0.key.hasPrefix("BODY[TEXT]") }?.value.text
+                result[uid] = FetchedMessage(
+                    meta: MessageMeta(internalDate: date, flags: flags, labels: gmLabels),
+                    rawHeaders: rawHeaders, rawBody: rawBody)
             }
         }
         return result

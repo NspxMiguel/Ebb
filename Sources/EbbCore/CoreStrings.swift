@@ -31,6 +31,18 @@ enum CoreStrings {
             "Summary unavailable: turn on Apple Intelligence in System Settings or save a Groq key."),
         "error.summary_failed": Localized("O resumo falhou: %@", "The summary failed: %@"),
 
+        "summary.on_device": Localized("Apple Intelligence neste Mac", "Apple Intelligence on this Mac"),
+        "summary.reason.not_enabled": Localized(
+            "O Apple Intelligence está desligado nos Ajustes do Mac.",
+            "Apple Intelligence is turned off in System Settings."),
+        "summary.reason.not_eligible": Localized(
+            "Este Mac não suporta Apple Intelligence.", "This Mac does not support Apple Intelligence."),
+        "summary.reason.not_ready": Localized(
+            "O modelo do Apple Intelligence ainda está baixando.", "The Apple Intelligence model is still downloading."),
+        "summary.reason.old_macos": Localized(
+            "O resumo no próprio Mac precisa do macOS 26 com Apple Intelligence.",
+            "On-device summaries need macOS 26 with Apple Intelligence."),
+
         "kind.codes": Localized("Códigos de verificação e login", "Verification and login codes"),
         "kind.bulk": Localized(
             "Newsletters, promoções e notificações em massa", "Newsletters, promotions and mass notifications"),

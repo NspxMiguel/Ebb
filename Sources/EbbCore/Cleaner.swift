@@ -40,7 +40,7 @@ public struct Cleaner: Sendable {
             let boxes = try await client.list()
             var plans: [MailboxPlan] = []
             for box in targets(in: boxes, client: client) {
-                let uids = try await candidates(in: box, client: client, mode: mode, cutoff: cutoff)
+                let uids = try await candidates(in: box, client: client, mode: mode, now: now)
                 plans.append(MailboxPlan(mailbox: box, uids: uids))
             }
             return CleanupPlan(mode: mode, cutoff: cutoff, mailboxes: plans)
@@ -57,16 +57,15 @@ public struct Cleaner: Sendable {
     ) async throws -> RunSummary {
         progress?(.connecting)
         let summary = try await withSession { client -> RunSummary in
-            let cutoff = cutoffDate(mode: mode, now: now)
             let boxes = try await client.list()
             var tally = Tally()
             if client.isGmail {
                 try await runGmail(
-                    client: client, boxes: boxes, mode: mode, cutoff: cutoff, dryRun: dryRun,
+                    client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
                     tally: &tally, progress: progress)
             } else {
                 try await runFolders(
-                    client: client, boxes: boxes, mode: mode, cutoff: cutoff, dryRun: dryRun,
+                    client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
                     tally: &tally, progress: progress)
             }
             return RunSummary(
@@ -88,7 +87,7 @@ public struct Cleaner: Sendable {
     private var rule: CleanupRule { account.rule }
 
     private func runGmail(
-        client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, cutoff: Date?, dryRun: Bool,
+        client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, now: Date, dryRun: Bool,
         tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
     ) async throws {
         let trash = boxes.first { $0.role == .trash && $0.selectable }
@@ -97,7 +96,7 @@ public struct Cleaner: Sendable {
 
         for box in selected where box.role != .trash {
             progress?(.scanning(mailbox: box.displayName))
-            let uids = try await candidates(in: box, client: client, mode: mode, cutoff: cutoff)
+            let uids = try await candidates(in: box, client: client, mode: mode, now: now)
             guard !uids.isEmpty else { continue }
             tally.touched += 1
             if dryRun {
@@ -127,7 +126,7 @@ public struct Cleaner: Sendable {
         // Moved messages keep their INTERNALDATE, so the same criteria find them
         // in Trash together with whatever old mail was already there.
         progress?(.scanning(mailbox: trash.displayName))
-        let uids = try await candidates(in: trash, client: client, mode: mode, cutoff: cutoff)
+        let uids = try await candidates(in: trash, client: client, mode: mode, now: now)
         if dryRun {
             if !uids.isEmpty { tally.touched += 1 }
             tally.deleted += uids.count
@@ -145,13 +144,13 @@ public struct Cleaner: Sendable {
     }
 
     private func runFolders(
-        client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, cutoff: Date?, dryRun: Bool,
+        client: IMAPClient, boxes: [MailboxInfo], mode: CleanupMode, now: Date, dryRun: Bool,
         tally: inout Tally, progress: (@Sendable (CleanerEvent) -> Void)?
     ) async throws {
         let trash = boxes.first { $0.role == .trash && $0.selectable }
         for box in targets(in: boxes, client: client) {
             progress?(.scanning(mailbox: box.displayName))
-            let uids = try await candidates(in: box, client: client, mode: mode, cutoff: cutoff)
+            let uids = try await candidates(in: box, client: client, mode: mode, now: now)
             guard !uids.isEmpty else { continue }
             tally.touched += 1
             if dryRun {
@@ -240,17 +239,22 @@ public struct Cleaner: Sendable {
     }
 
     private func candidates(
-        in box: MailboxInfo, client: IMAPClient, mode: CleanupMode, cutoff: Date?
+        in box: MailboxInfo, client: IMAPClient, mode: CleanupMode, now: Date
     ) async throws -> [UInt32] {
         let exists = try await client.select(box.rawName)
         guard exists > 0 else { return [] }
 
+        let longCutoff = now.addingTimeInterval(-rule.maxAge)
+        let tiered = mode == .expired && rule.usesDisposableTier
+        let shortCutoff = now.addingTimeInterval(-rule.disposableAge)
+
         var criteria: [String]
-        if mode == .expired, let cutoff {
+        if mode == .expired {
             // SEARCH dates have day granularity in the server's own time zone.
             // Two days past the cutoff is a superset in any zone; the exact
             // INTERNALDATE comparison below does the real filtering.
-            criteria = ["BEFORE", IMAPClient.searchDate(cutoff.addingTimeInterval(2 * 86_400))]
+            let searchCutoff = tiered ? shortCutoff : longCutoff
+            criteria = ["BEFORE", IMAPClient.searchDate(searchCutoff.addingTimeInterval(2 * 86_400))]
         } else {
             criteria = ["ALL"]
         }
@@ -263,13 +267,40 @@ public struct Cleaner: Sendable {
         let found = try await client.uidSearch(criteria.joined(separator: " "))
         guard !found.isEmpty else { return [] }
         let meta = try await client.fetchMeta(found, labels: client.isGmail)
-        return found.filter { uid in
-            guard let message = meta[uid] else { return false }
-            if message.flags.contains("\\DRAFT") || message.labels.contains("\\DRAFT") { return false }
-            if rule.keepFlagged && message.flags.contains("\\FLAGGED") { return false }
-            if let cutoff, mode == .expired { return message.internalDate < cutoff }
-            return true
+
+        var sure: [UInt32] = []
+        var needsHeaders: [UInt32] = []
+        for uid in found {
+            guard let message = meta[uid], !isProtected(message) else { continue }
+            guard mode == .expired else {
+                sure.append(uid)
+                continue
+            }
+            if message.internalDate < longCutoff {
+                sure.append(uid)
+            } else if tiered && message.internalDate < shortCutoff {
+                needsHeaders.append(uid)
+            }
         }
+        guard !needsHeaders.isEmpty else { return sure }
+
+        // Only messages in the window between the two ages need their headers
+        // read, which keeps an hourly run cheap on a big mailbox.
+        let fetched = try await client.fetchMessages(needsHeaders, labels: false, headers: true)
+        let disposable = needsHeaders.filter { uid in
+            guard let raw = fetched[uid]?.rawHeaders,
+                let kind = MessageClassifier.kind(of: MessageHeaders.parse(raw))
+            else { return false }
+            return rule.disposableKinds.contains(kind)
+        }
+        return (sure + disposable).sorted()
+    }
+
+    private func isProtected(_ message: MessageMeta) -> Bool {
+        if message.flags.contains("\\DRAFT") || message.labels.contains("\\DRAFT") { return true }
+        if rule.keepFlagged && message.flags.contains("\\FLAGGED") { return true }
+        if rule.keepImportant && message.labels.contains("\\IMPORTANT") { return true }
+        return false
     }
 
     private func cutoffDate(mode: CleanupMode, now: Date) -> Date? {
@@ -278,7 +309,7 @@ public struct Cleaner: Sendable {
 
     // MARK: - Session
 
-    private func withSession<T>(_ body: (IMAPClient) async throws -> T) async throws -> T {
+    func withSession<T>(_ body: (IMAPClient) async throws -> T) async throws -> T {
         let endpoint = account.endpoint
         if !endpoint.useTLS && !endpoint.isLoopback {
             throw EbbError.insecureConnection
