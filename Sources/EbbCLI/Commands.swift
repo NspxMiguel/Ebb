@@ -538,7 +538,7 @@ enum CLI {
             Array(args.dropFirst()),
             value: [
                 "max-age", "disposable-age", "keep-flagged", "keep-important", "ai", "codes", "bulk",
-                "permanent", "enabled", "exclude", "include", "agent", "agent-folder",
+                "permanent", "enabled", "exclude", "include", "agent", "agent-folder", "agent-age",
             ],
             bool: [])
         {
@@ -622,6 +622,13 @@ enum CLI {
         if let raw = parsed.values["agent-folder"]?.last {
             rule.agentFolder = raw
         }
+        if let raw = parsed.values["agent-age"]?.last {
+            guard let interval = Terminal.parseAge(raw) else {
+                Terminal.err(t("cli.set.bad_age", raw))
+                return 2
+            }
+            rule.agentAge = interval
+        }
         for name in parsed.values["exclude"] ?? [] {
             if !rule.excludedMailboxes.contains(name) {
                 rule.excludedMailboxes.append(name)
@@ -658,7 +665,9 @@ enum CLI {
         Terminal.out(t("cli.set.excluded", excluded))
         Terminal.out(
             account.rule.tidiesAgentMail
-                ? t("cli.set.agent", account.rule.agentAddress, account.rule.agentFolder)
+                ? t(
+                    "cli.set.agent", account.rule.agentAddress, account.rule.agentFolder,
+                    Terminal.age(account.rule.agentAge))
                 : t("cli.set.agent_off"))
         return 0
     }
@@ -758,6 +767,7 @@ enum CLI {
             [
                 "ebb set <account> [--max-age 30m|12h|1d|3d|14d|30d|never]",
                 "         [--agent <address>|off] [--agent-folder <mailbox>]",
+                "         [--agent-age 1h|12h|1d|3d|never]",
                 "         [--disposable-age 15m|1h|3h|12h] [--codes on|off] [--bulk on|off]",
                 "         [--keep-flagged on|off] [--keep-important on|off] [--ai on|off]",
                 "         [--permanent on|off] [--enabled on|off]",

@@ -50,6 +50,40 @@ final class CleanerTierTests: XCTestCase {
         }
     }
 
+    func testAgentMailExpiresOnItsOwnAgeInBothDirections() async throws {
+        let server = try server(.icloud)
+        let oldFromAgent = seed(server, hours: 30, headers: "From: Claude <claude@nspx.dev>\r\nSubject: update\r\n")
+        let oldToAgent = seed(
+            server, hours: 30, headers: "From: miguel@keepok.com.br\r\nTo: claude@nspx.dev\r\nSubject: re\r\n")
+        let freshFromAgent = seed(
+            server, hours: 2, headers: "From: Claude <claude@nspx.dev>\r\nSubject: newer\r\n")
+        let oldStranger = seed(server, hours: 30, headers: "From: alguem@example.com\r\nSubject: ola\r\n")
+        let flaggedAgent = seed(
+            server, hours: 30, headers: "From: Claude <claude@nspx.dev>\r\nSubject: keep\r\n",
+            flags: ["\\Flagged"])
+
+        // The long tier is off, so only the agent's own age can delete anything.
+        let rule = CleanupRule(
+            maxAge: CleanupRule.neverAge, disposableKinds: [], agentAddress: "claude@nspx.dev",
+            agentFolder: "Claude", agentAge: 86_400)
+        let summary = try await cleaner(server, rule: rule).run(mode: .expired, dryRun: false, now: now)
+
+        XCTAssertEqual(summary.deleted, 2)
+        XCTAssertEqual(server.messageIDs(in: "INBOX"), [freshFromAgent, oldStranger, flaggedAgent])
+        _ = (oldFromAgent, oldToAgent)
+    }
+
+    func testAgentMailWithoutItsOwnAgeIsKept() async throws {
+        let server = try server(.icloud)
+        let old = seed(server, hours: 24 * 30, headers: "From: Claude <claude@nspx.dev>\r\nSubject: update\r\n")
+        let rule = CleanupRule(
+            maxAge: CleanupRule.neverAge, disposableKinds: [], agentAddress: "claude@nspx.dev",
+            agentFolder: "Claude")
+        let summary = try await cleaner(server, rule: rule).run(mode: .expired, dryRun: false, now: now)
+        XCTAssertEqual(summary.deleted, 0)
+        XCTAssertEqual(server.messageIDs(in: "INBOX"), [old])
+    }
+
     func testNeverMaxAgeCleansOnlyDisposableMail() async throws {
         for profile in [FakeIMAPServer.Profile.icloud, .gmail] {
             let server = try server(profile)

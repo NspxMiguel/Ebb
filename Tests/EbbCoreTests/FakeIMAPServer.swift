@@ -383,6 +383,20 @@ final class FakeIMAPServer: @unchecked Sendable {
         return formatter
     }
 
+    /// Substring match on one raw header line, which is what IMAP's HEADER key
+    /// specifies and all the cleaner relies on.
+    private func headerContains(_ field: String, _ value: String, uid: UInt32, in view: Int) -> Bool {
+        guard let id = views[view].messages[uid], let raw = messages[id]?.rawHeaders else { return false }
+        // The client sends the value quoted; the quotes are syntax, not content.
+        let wanted = value.trimmingCharacters(in: CharacterSet(charactersIn: "\"")).lowercased()
+        let needle = field.lowercased() + ":"
+        for line in raw.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        where line.lowercased().hasPrefix(needle) {
+            if line.lowercased().contains(wanted) { return true }
+        }
+        return false
+    }
+
     private func uidSet(_ text: String, in view: Int) -> Set<UInt32>? {
         let maximum = views[view].messages.keys.max() ?? 0
         func number(_ value: Substring) -> UInt32? { value == "*" ? maximum : UInt32(value) }
@@ -514,6 +528,12 @@ final class FakeIMAPServer: @unchecked Sendable {
                     index += 1
                     guard index < args.count, let subset = uidSet(args[index], in: view) else { return bad() }
                     matches.formIntersection(subset)
+                case "HEADER":
+                    guard index + 2 < args.count else { return bad() }
+                    let field = args[index + 1]
+                    let value = args[index + 2]
+                    index += 2
+                    matches = matches.filter { headerContains(field, value, uid: $0, in: view) }
                 default: return bad()
                 }
                 index += 1

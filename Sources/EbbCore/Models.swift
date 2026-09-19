@@ -72,6 +72,12 @@ public struct CleanupRule: Codable, Hashable, Sendable {
     /// Where a superseded agent message goes. Archived, never deleted: a run
     /// that is wrong about which message is current must be undoable.
     public var agentFolder: String
+    /// How long agent mail is kept once it has been archived. This is its own
+    /// age because the conversation with an agent goes stale much faster than
+    /// ordinary mail, and because `agentFolder` is deliberately outside the
+    /// age-based sweep — without this, archiving would mean keeping forever.
+    /// `neverAge` keeps it indefinitely.
+    public var agentAge: TimeInterval
 
     public init(
         maxAge: TimeInterval = 86_400,
@@ -83,7 +89,8 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         aiTriage: Bool = false,
         excludedMailboxes: [String] = [],
         agentAddress: String = "",
-        agentFolder: String = "Claude"
+        agentFolder: String = "Claude",
+        agentAge: TimeInterval = CleanupRule.neverAge
     ) {
         self.maxAge = maxAge
         self.disposableAge = disposableAge
@@ -95,11 +102,17 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         self.excludedMailboxes = excludedMailboxes
         self.agentAddress = agentAddress
         self.agentFolder = agentFolder
+        self.agentAge = agentAge
     }
 
     /// Whether agent mail is tidied at all.
     public var tidiesAgentMail: Bool {
         !agentAddress.isEmpty && !agentFolder.isEmpty
+    }
+
+    /// Whether agent mail also expires on its own clock.
+    public var expiresAgentMail: Bool {
+        tidiesAgentMail && agentAge < Self.neverAge
     }
 
     public static let `default` = CleanupRule()
@@ -132,6 +145,7 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         excludedMailboxes = try c.decodeIfPresent([String].self, forKey: .excludedMailboxes) ?? []
         agentAddress = try c.decodeIfPresent(String.self, forKey: .agentAddress) ?? fallback.agentAddress
         agentFolder = try c.decodeIfPresent(String.self, forKey: .agentFolder) ?? fallback.agentFolder
+        agentAge = try c.decodeIfPresent(TimeInterval.self, forKey: .agentAge) ?? fallback.agentAge
     }
 }
 

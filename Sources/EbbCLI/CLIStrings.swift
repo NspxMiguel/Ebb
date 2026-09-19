@@ -157,7 +157,8 @@ enum CLIStrings {
         "cli.set.keep_important": Localized("manter importantes: %@", "keep important: %@"),
         "cli.set.permanent": Localized("permanente: %@", "permanent: %@"),
         "cli.set.enabled": Localized("ativo: %@", "enabled: %@"),
-        "cli.set.agent": Localized("agente: %@ → %@", "agent: %@ → %@"),
+        "cli.set.agent": Localized(
+            "agente: %@ → %@, apaga em %@", "agent: %@ → %@, deleted after %@"),
         "cli.set.agent_off": Localized("agente: desligado", "agent: off"),
         "cli.set.excluded": Localized("excluídas: %@", "excluded: %@"),
         "cli.set.excluded_none": Localized("nenhuma", "none"),

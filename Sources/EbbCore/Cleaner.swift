@@ -72,6 +72,11 @@ public struct Cleaner: Sendable {
                 try await tidyAgentMail(
                     client: client, boxes: boxes, dryRun: dryRun, tally: &tally, progress: progress)
             }
+            if mode == .expired, rule.expiresAgentMail {
+                try await expireAgentMail(
+                    client: client, boxes: boxes, now: now, dryRun: dryRun, tally: &tally,
+                    progress: progress)
+            }
             if client.isGmail {
                 try await runGmail(
                     client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
@@ -199,6 +204,74 @@ public struct Cleaner: Sendable {
         let remaining = try await client.existing(stale)
         tally.archived += stale.count - remaining.count
         tally.pending += remaining.count
+    }
+
+    /// Deletes agent mail past `agentAge`, in the Inbox and in the agent folder.
+    ///
+    /// Runs after the tidy pass, so a message archived in this very run is
+    /// already old enough to go if it is. Both directions count as agent mail:
+    /// what the agent wrote and what was addressed to it are the same
+    /// conversation, and keeping one half would be pointless. Flagged messages
+    /// are protected as everywhere else, and the agent folder is swept here
+    /// even though the age-based pass deliberately skips it.
+    private func expireAgentMail(
+        client: IMAPClient, boxes: [MailboxInfo], now: Date, dryRun: Bool, tally: inout Tally,
+        progress: (@Sendable (CleanerEvent) -> Void)?
+    ) async throws {
+        let cutoff = now.addingTimeInterval(-rule.agentAge)
+        let address = IMAPParser.quote(rule.agentAddress)
+        let trash = boxes.first { $0.role == .trash && $0.selectable }
+        var swept = boxes.filter { $0.role == .inbox && $0.selectable }
+        if let folder = boxes.first(where: { $0.rawName == rule.agentFolder && $0.selectable }) {
+            swept.append(folder)
+        }
+
+        for box in swept {
+            progress?(.scanning(mailbox: box.displayName))
+            let exists = try await client.select(box.rawName)
+            guard exists > 0 else { continue }
+
+            // Day-granularity SEARCH in the server's zone; the exact comparison
+            // below is what decides, as in the age-based pass. From and To are
+            // two searches rather than one OR: the union is the same and every
+            // server agrees on the simple form.
+            var shared = ["BEFORE", IMAPClient.searchDate(cutoff.addingTimeInterval(2 * 86_400))]
+            if rule.keepFlagged { shared.append("UNFLAGGED") }
+            if !rule.permanent { shared.append("UNDELETED") }
+
+            var found: [UInt32] = []
+            for header in ["From", "To"] {
+                let criteria = (shared + ["HEADER", header, address]).joined(separator: " ")
+                found.append(contentsOf: try await client.uidSearch(criteria))
+            }
+            found = Array(Set(found)).sorted()
+            guard !found.isEmpty else { continue }
+            let meta = try await client.fetchMeta(found, labels: false)
+            let uids = found.filter { uid in
+                guard let message = meta[uid], !isProtected(message) else { return false }
+                return message.internalDate < cutoff
+            }
+            guard !uids.isEmpty else { continue }
+
+            tally.touched += 1
+            if dryRun {
+                tally.deleted += uids.count
+                continue
+            }
+            if rule.permanent {
+                let removed = try await deleteForever(uids, in: box, client: client, progress: progress)
+                tally.deleted += removed
+                tally.pending += uids.count - removed
+            } else {
+                guard let trash else { throw EbbError.trashNotFound }
+                try await inChunks(uids, mailbox: box.displayName, progress: progress) { chunk in
+                    try await client.move(chunk, to: trash.rawName)
+                }
+                let remaining = try await client.existing(uids)
+                tally.deleted += uids.count - remaining.count
+                tally.pending += remaining.count
+            }
+        }
     }
 
     /// Creates the destination the first time a tidy run needs it.
