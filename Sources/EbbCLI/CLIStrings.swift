@@ -107,6 +107,9 @@ enum CLIStrings {
         "cli.run_none": Localized("Nenhuma conta ativa.", "No enabled accounts."),
         "cli.run_summary": Localized(
             "%@: %d apagadas, %d pendentes, %@", "%@: %d deleted, %d pending, %@"),
+        "cli.run_archived": Localized(
+            "%@: %d apagadas, %d arquivadas, %d pendentes, %@",
+            "%@: %d deleted, %d archived, %d pending, %@"),
 
         // summary.
         "cli.summary.header": Localized("%@:", "%@:"),
@@ -154,6 +157,8 @@ enum CLIStrings {
         "cli.set.keep_important": Localized("manter importantes: %@", "keep important: %@"),
         "cli.set.permanent": Localized("permanente: %@", "permanent: %@"),
         "cli.set.enabled": Localized("ativo: %@", "enabled: %@"),
+        "cli.set.agent": Localized("agente: %@ → %@", "agent: %@ → %@"),
+        "cli.set.agent_off": Localized("agente: desligado", "agent: off"),
         "cli.set.excluded": Localized("excluídas: %@", "excluded: %@"),
         "cli.set.excluded_none": Localized("nenhuma", "none"),
         "cli.set.bad_age": Localized(

@@ -131,8 +131,12 @@ final class IMAPClient {
     }
 
     /// Header fields the classifier and the digest need; one request covers both.
+    /// IN-REPLY-TO, REFERENCES and X-CLAUDE-SESSION are what tie an agent's
+    /// messages into one conversation — leave them out and every message looks
+    /// like a thread of its own, so nothing is ever superseded.
     static let headerFields =
-        "FROM SUBJECT DATE MESSAGE-ID LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
+        "FROM SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES X-CLAUDE-SESSION "
+        + "LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
 
     struct FetchedMessage {
         var meta: MessageMeta
@@ -173,6 +177,13 @@ final class IMAPClient {
 
     func move(_ uids: [UInt32], to rawName: String) async throws {
         _ = try await command("UID MOVE \(UIDSet.string(from: uids)) \(IMAPParser.quote(rawName))")
+    }
+
+    /// CREATE plus SUBSCRIBE, so the folder also shows up in Mail clients that
+    /// only list subscribed mailboxes.
+    func create(_ rawName: String) async throws {
+        _ = try await command("CREATE \(IMAPParser.quote(rawName))")
+        _ = try? await command("SUBSCRIBE \(IMAPParser.quote(rawName))")
     }
 
     func copy(_ uids: [UInt32], to rawName: String) async throws {
@@ -258,8 +269,13 @@ final class IMAPClient {
     }
 
     private static let roleNames: [(MailboxRole, [String])] = [
-        (.sent, ["sent", "sent messages", "sent mail", "sent items", "enviados", "e-mails enviados",
-                 "mensagens enviadas", "itens enviados"]),
+        (
+            .sent,
+            [
+                "sent", "sent messages", "sent mail", "sent items", "enviados", "e-mails enviados",
+                "mensagens enviadas", "itens enviados",
+            ]
+        ),
         (.drafts, ["drafts", "rascunhos"]),
         (.trash, ["trash", "deleted messages", "deleted items", "lixeira", "itens excluídos", "itens apagados"]),
         (.junk, ["junk", "spam", "junk e-mail", "lixo eletrônico", "lixo eletronico"]),

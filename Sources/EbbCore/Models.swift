@@ -65,6 +65,13 @@ public struct CleanupRule: Codable, Hashable, Sendable {
     /// Raw IMAP mailbox names (as LIST returns them) the cleanup never touches.
     /// Drafts are always skipped regardless of this list.
     public var excludedMailboxes: [String]
+    /// An agent that writes running updates to this mailbox. Mail from this
+    /// address is tidied per conversation: only each conversation's newest
+    /// message stays in the Inbox. Empty turns it off. See `AgentDigest`.
+    public var agentAddress: String
+    /// Where a superseded agent message goes. Archived, never deleted: a run
+    /// that is wrong about which message is current must be undoable.
+    public var agentFolder: String
 
     public init(
         maxAge: TimeInterval = 86_400,
@@ -74,7 +81,9 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         keepImportant: Bool = true,
         permanent: Bool = true,
         aiTriage: Bool = false,
-        excludedMailboxes: [String] = []
+        excludedMailboxes: [String] = [],
+        agentAddress: String = "",
+        agentFolder: String = "Claude"
     ) {
         self.maxAge = maxAge
         self.disposableAge = disposableAge
@@ -84,6 +93,13 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         self.permanent = permanent
         self.aiTriage = aiTriage
         self.excludedMailboxes = excludedMailboxes
+        self.agentAddress = agentAddress
+        self.agentFolder = agentFolder
+    }
+
+    /// Whether agent mail is tidied at all.
+    public var tidiesAgentMail: Bool {
+        !agentAddress.isEmpty && !agentFolder.isEmpty
     }
 
     public static let `default` = CleanupRule()
@@ -114,6 +130,8 @@ public struct CleanupRule: Codable, Hashable, Sendable {
         permanent = try c.decodeIfPresent(Bool.self, forKey: .permanent) ?? fallback.permanent
         aiTriage = try c.decodeIfPresent(Bool.self, forKey: .aiTriage) ?? fallback.aiTriage
         excludedMailboxes = try c.decodeIfPresent([String].self, forKey: .excludedMailboxes) ?? []
+        agentAddress = try c.decodeIfPresent(String.self, forKey: .agentAddress) ?? fallback.agentAddress
+        agentFolder = try c.decodeIfPresent(String.self, forKey: .agentFolder) ?? fallback.agentFolder
     }
 }
 
@@ -133,6 +151,9 @@ public struct RunSummary: Codable, Hashable, Sendable {
     /// Localized note about something that degraded without failing the run,
     /// e.g. the AI triage could not be reached and messages were kept.
     public var warning: String?
+    /// Superseded agent messages filed away. Kept apart from `deleted`: they
+    /// are still in the mailbox, just not in the Inbox.
+    public var archived: Int
 
     public init(
         date: Date = Date(),
@@ -142,7 +163,8 @@ public struct RunSummary: Codable, Hashable, Sendable {
         pending: Int = 0,
         mailboxesTouched: Int = 0,
         errorMessage: String? = nil,
-        warning: String? = nil
+        warning: String? = nil,
+        archived: Int = 0
     ) {
         self.date = date
         self.mode = mode
@@ -152,6 +174,21 @@ public struct RunSummary: Codable, Hashable, Sendable {
         self.mailboxesTouched = mailboxesTouched
         self.errorMessage = errorMessage
         self.warning = warning
+        self.archived = archived
+    }
+
+    // Summaries written before this field existed decode with zero.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        date = try c.decode(Date.self, forKey: .date)
+        mode = try c.decode(CleanupMode.self, forKey: .mode)
+        dryRun = try c.decode(Bool.self, forKey: .dryRun)
+        deleted = try c.decodeIfPresent(Int.self, forKey: .deleted) ?? 0
+        pending = try c.decodeIfPresent(Int.self, forKey: .pending) ?? 0
+        mailboxesTouched = try c.decodeIfPresent(Int.self, forKey: .mailboxesTouched) ?? 0
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        warning = try c.decodeIfPresent(String.self, forKey: .warning)
+        archived = try c.decodeIfPresent(Int.self, forKey: .archived) ?? 0
     }
 
     public var succeeded: Bool { errorMessage == nil }

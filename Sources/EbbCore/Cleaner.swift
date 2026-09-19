@@ -68,6 +68,10 @@ public struct Cleaner: Sendable {
             defer { context.finish(now: now) }
             let boxes = try await client.list()
             var tally = Tally()
+            if mode == .expired, rule.tidiesAgentMail {
+                try await tidyAgentMail(
+                    client: client, boxes: boxes, dryRun: dryRun, tally: &tally, progress: progress)
+            }
             if client.isGmail {
                 try await runGmail(
                     client: client, boxes: boxes, mode: mode, now: now, dryRun: dryRun,
@@ -79,7 +83,7 @@ public struct Cleaner: Sendable {
             }
             return RunSummary(
                 date: now, mode: mode, dryRun: dryRun, deleted: tally.deleted, pending: tally.pending,
-                mailboxesTouched: tally.touched, warning: context.warning)
+                mailboxesTouched: tally.touched, warning: context.warning, archived: tally.archived)
         }
         progress?(.finished(summary))
         return summary
@@ -91,6 +95,9 @@ public struct Cleaner: Sendable {
         var deleted = 0
         var pending = 0
         var touched = 0
+        /// Agent messages filed away rather than deleted; counted apart so a
+        /// run summary never reports an archive as a deletion.
+        var archived = 0
     }
 
     private var rule: CleanupRule { account.rule }
@@ -150,6 +157,54 @@ public struct Cleaner: Sendable {
         tally.pending += uids.count - removed
         // What left Trash is gone for good, and it includes what this run moved.
         tally.deleted += removed
+    }
+
+    /// Moves each agent conversation's superseded messages out of the Inbox.
+    ///
+    /// Only the Inbox is read: a message already filed somewhere else was put
+    /// there by someone, and re-filing it would fight them. Superseded messages
+    /// are moved, never deleted — `AgentDigest` explains why the grouping is
+    /// per conversation rather than per sender.
+    private func tidyAgentMail(
+        client: IMAPClient, boxes: [MailboxInfo], dryRun: Bool, tally: inout Tally,
+        progress: (@Sendable (CleanerEvent) -> Void)?
+    ) async throws {
+        guard let inbox = boxes.first(where: { $0.role == .inbox && $0.selectable }) else { return }
+        progress?(.scanning(mailbox: inbox.displayName))
+
+        let exists = try await client.select(inbox.rawName)
+        guard exists > 0 else { return }
+        let found = try await client.uidSearch("UNDELETED HEADER From \(IMAPParser.quote(rule.agentAddress))")
+        guard found.count > 1 else { return }
+
+        let meta = try await client.fetchMeta(found, labels: false)
+        let fetched = try await client.fetchMessages(found, labels: false, headers: true)
+        let messages = found.compactMap { uid -> AgentDigest.Message? in
+            guard let date = meta[uid]?.internalDate, let raw = fetched[uid]?.rawHeaders else { return nil }
+            return AgentDigest.Message(uid: uid, internalDate: date, headers: MessageHeaders.parse(raw))
+        }
+
+        let stale = AgentDigest.superseded(in: messages)
+        guard !stale.isEmpty else { return }
+        tally.touched += 1
+        if dryRun {
+            tally.archived += stale.count
+            return
+        }
+
+        try await ensureMailbox(rule.agentFolder, in: boxes, client: client)
+        try await inChunks(stale, mailbox: inbox.displayName, progress: progress) { chunk in
+            try await client.move(chunk, to: self.rule.agentFolder)
+        }
+        let remaining = try await client.existing(stale)
+        tally.archived += stale.count - remaining.count
+        tally.pending += remaining.count
+    }
+
+    /// Creates the destination the first time a tidy run needs it.
+    private func ensureMailbox(_ name: String, in boxes: [MailboxInfo], client: IMAPClient) async throws {
+        guard !boxes.contains(where: { $0.rawName == name }) else { return }
+        try await client.create(name)
     }
 
     private func runFolders(
