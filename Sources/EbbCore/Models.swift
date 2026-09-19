@@ -88,6 +88,14 @@ public struct CleanupRule: Codable, Hashable, Sendable {
 
     public static let `default` = CleanupRule()
 
+    /// A `maxAge` of this or more turns the long tier off: only disposable mail
+    /// is cleaned and everything else stays, however old it gets. A finite value
+    /// (a century) rather than `.infinity`, which JSON cannot encode.
+    public static let neverAge: TimeInterval = 3_155_760_000
+
+    /// Whether the long tier applies at all.
+    public var usesLongTier: Bool { maxAge < Self.neverAge }
+
     /// Whether the short tier applies at all.
     public var usesDisposableTier: Bool {
         !disposableKinds.isEmpty && disposableAge < maxAge

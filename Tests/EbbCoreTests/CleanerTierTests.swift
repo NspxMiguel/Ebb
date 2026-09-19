@@ -50,6 +50,31 @@ final class CleanerTierTests: XCTestCase {
         }
     }
 
+    func testNeverMaxAgeCleansOnlyDisposableMail() async throws {
+        for profile in [FakeIMAPServer.Profile.icloud, .gmail] {
+            let server = try server(profile)
+            seed(server, hours: 2, headers: "Subject: Your verification code\r\n")
+            let oldPersonal = seed(server, hours: 24 * 400, headers: "Subject: A letter from years ago\r\n")
+            let recentPersonal = seed(server, hours: 30, headers: "Subject: Dinner tonight?\r\n")
+            let rule = CleanupRule(maxAge: CleanupRule.neverAge)
+            XCTAssertFalse(rule.usesLongTier)
+            let summary = try await cleaner(server, rule: rule).run(mode: .expired, dryRun: false, now: now)
+            XCTAssertEqual(summary.deleted, 1)
+            XCTAssertEqual(server.messageIDs(in: "INBOX"), [oldPersonal, recentPersonal])
+            server.stop()
+        }
+    }
+
+    func testNeverMaxAgeWithoutDisposableKindsDeletesNothing() async throws {
+        let server = try server(.icloud)
+        let code = seed(server, hours: 2, headers: "Subject: Your verification code\r\n")
+        let old = seed(server, hours: 24 * 400, headers: "Subject: A letter from years ago\r\n")
+        let rule = CleanupRule(maxAge: CleanupRule.neverAge, disposableKinds: [])
+        let summary = try await cleaner(server, rule: rule).run(mode: .expired, dryRun: false, now: now)
+        XCTAssertEqual(summary.deleted, 0)
+        XCTAssertEqual(server.messageIDs(in: "INBOX"), [code, old])
+    }
+
     func testCodesOnlyLeavesYoungNewsletterForBothProfiles() async throws {
         for profile in [FakeIMAPServer.Profile.icloud, .gmail] {
             let server = try server(profile)

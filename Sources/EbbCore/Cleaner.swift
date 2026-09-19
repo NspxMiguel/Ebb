@@ -262,6 +262,7 @@ public struct Cleaner: Sendable {
             // SEARCH dates have day granularity in the server's own time zone.
             // Two days past the cutoff is a superset in any zone; the exact
             // INTERNALDATE comparison below does the real filtering.
+            guard tiered || rule.usesLongTier else { return [] }
             let searchCutoff = tiered ? shortCutoff : longCutoff
             criteria = ["BEFORE", IMAPClient.searchDate(searchCutoff.addingTimeInterval(2 * 86_400))]
         } else {
@@ -285,7 +286,7 @@ public struct Cleaner: Sendable {
                 sure.append(uid)
                 continue
             }
-            if message.internalDate < longCutoff {
+            if rule.usesLongTier && message.internalDate < longCutoff {
                 sure.append(uid)
             } else if tiered && message.internalDate < shortCutoff {
                 needsHeaders.append(uid)

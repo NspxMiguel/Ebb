@@ -741,7 +741,7 @@ enum CLI {
         (
             "set",
             [
-                "ebb set <account> [--max-age 30m|12h|1d|3d|14d|30d]",
+                "ebb set <account> [--max-age 30m|12h|1d|3d|14d|30d|never]",
                 "         [--disposable-age 15m|1h|3h|12h] [--codes on|off] [--bulk on|off]",
                 "         [--keep-flagged on|off] [--keep-important on|off] [--ai on|off]",
                 "         [--permanent on|off] [--enabled on|off]",

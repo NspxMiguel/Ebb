@@ -103,6 +103,7 @@ enum Terminal {
 
     /// Compact, neutral durations: `45s`, `30m`, `12h`, `7d`.
     static func age(_ interval: TimeInterval) -> String {
+        if interval >= CleanupRule.neverAge { return L10n.shared("cli.age.never") }
         let seconds = max(0, Int(interval.rounded()))
         if seconds >= 86_400 && seconds % 86_400 == 0 { return "\(seconds / 86_400)d" }
         if seconds >= 3_600 && seconds % 3_600 == 0 { return "\(seconds / 3_600)h" }
@@ -113,6 +114,7 @@ enum Terminal {
     /// Parses a duration token (`30m`, `12h`, `1d`) back into seconds; nil on
     /// anything else.
     static func parseAge(_ text: String) -> TimeInterval? {
+        if text.lowercased() == "never" { return CleanupRule.neverAge }
         guard let unit = text.last, let number = Int(text.dropLast()), number > 0 else { return nil }
         switch unit {
         case "m": return TimeInterval(number * 60)

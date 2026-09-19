@@ -146,6 +146,7 @@ enum CLIStrings {
             "modelo local: %@", "on-device model: %@"),
 
         // set.
+        "cli.age.never": Localized("nunca", "never"),
         "cli.set.max_age": Localized("idade máx.: %@", "max age: %@"),
         "cli.set.disposable_age": Localized("idade descartável: %@", "disposable age: %@"),
         "cli.set.kinds": Localized("tipos descartáveis: %@", "disposable kinds: %@"),
@@ -167,5 +168,5 @@ enum CLIStrings {
             "idioma inválido: %@ (use pt, en ou system)",
             "invalid language: %@ (use pt, en or system)"),
         "cli.set.ai": Localized("triagem por IA: %@", "AI triage: %@"),
-]
+    ]
 }

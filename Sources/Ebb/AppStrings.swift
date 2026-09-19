@@ -66,6 +66,7 @@ enum AppStrings {
         "app.age.7d": Localized("7 dias", "7 days"),
         "app.age.14d": Localized("14 dias", "14 days"),
         "app.age.30d": Localized("30 dias", "30 days"),
+        "app.age.never": Localized("Nunca — só descartáveis", "Never — disposable only"),
         "app.keep_flagged": Localized("Nunca apagar com estrela ou bandeira", "Keep starred or flagged"),
         "app.keep_important": Localized(
             "Nunca apagar o que o Gmail marca como Importante",
@@ -131,7 +132,8 @@ enum AppStrings {
         "app.summary.groq_link": Localized("Pegar uma chave na Groq", "Get a Groq key"),
         "app.summary.groq_privacy": Localized(
             "Com a Groq, o remetente, o assunto e as primeiras linhas de cada e-mail são enviados para ela. Quando o Apple Intelligence está ligado, o modelo do próprio Mac é usado no lugar.",
-            "With Groq, the sender, subject and the first lines of each email are sent to Groq; the on-device model is used instead whenever Apple Intelligence is on."),
+            "With Groq, the sender, subject and the first lines of each email are sent to Groq; the on-device model is used instead whenever Apple Intelligence is on."
+        ),
         "app.summary.open_general": Localized("Abrir Geral…", "Open General…"),
         "app.summary.by": Localized("por %@", "by %@"),
         "app.summary.refresh": Localized("Atualizar", "Refresh"),
@@ -141,10 +143,12 @@ enum AppStrings {
             "Deixar a IA decidir o que é descartável", "Let AI decide what is disposable"),
         "app.ai_triage.on_device": Localized(
             "Roda no Apple Intelligence deste Mac: nada sai do computador. Na dúvida, o e-mail fica até o prazo longo.",
-            "Runs on this Mac's Apple Intelligence: nothing leaves the computer. When unsure, mail stays until the long age."),
+            "Runs on this Mac's Apple Intelligence: nothing leaves the computer. When unsure, mail stays until the long age."
+        ),
         "app.ai_triage.groq": Localized(
             "Usa a Groq: remetente, assunto e o começo dos e-mails entre os dois prazos são enviados para ela. Na dúvida ou se falhar, o e-mail fica até o prazo longo.",
-            "Uses Groq: sender, subject and the first lines of messages between the two ages are sent to it. When unsure or on failure, mail stays until the long age."),
+            "Uses Groq: sender, subject and the first lines of messages between the two ages are sent to it. When unsure or on failure, mail stays until the long age."
+        ),
         "app.ai_triage.none": Localized(
             "Precisa do Apple Intelligence ou de uma chave da Groq (em Geral). Sem isso, só valem as regras de cabeçalho.",
             "Needs Apple Intelligence or a Groq key (in General). Without either, only the header rules apply."),

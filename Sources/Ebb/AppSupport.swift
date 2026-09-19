@@ -44,6 +44,7 @@ enum MaxAgeOption: TimeInterval, CaseIterable, Identifiable {
     case sevenDays = 604_800
     case fourteenDays = 1_209_600
     case thirtyDays = 2_592_000
+    case never = 3_155_760_000
 
     var id: TimeInterval { rawValue }
 
@@ -55,6 +56,7 @@ enum MaxAgeOption: TimeInterval, CaseIterable, Identifiable {
         case .sevenDays: return "app.age.7d"
         case .fourteenDays: return "app.age.14d"
         case .thirtyDays: return "app.age.30d"
+        case .never: return "app.age.never"
         }
     }
 
