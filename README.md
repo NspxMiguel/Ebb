@@ -1,8 +1,28 @@
-# Ebb
+<h1 align="center">Ebb</h1>
 
-Mail that ebbs away: keeps your inbox from ever filling up.
+<p align="center">
+  <b>Mail that ebbs away: keeps your inbox from ever filling up.</b><br>
+  A macOS menu bar app and <code>ebb</code> CLI that delete expired mail from Gmail, iCloud and any IMAP server.
+</p>
 
-> Ebb permanently deletes email. Preview first with a dry run (`ebb scan`, or
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="Platform: macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-black?logo=apple">
+  <img alt="Swift" src="https://img.shields.io/badge/built_with-Swift-F05138?logo=swift&logoColor=white">
+  <a href="https://github.com/NspxMiguel/Ebb/tags"><img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-lightgrey"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#setting-up-an-account">Accounts</a> ·
+  <a href="#how-deletion-works">Deletion</a> ·
+  <a href="#safety">Safety</a> ·
+  <a href="#cli-reference">CLI</a> ·
+  <a href="#uninstall">Uninstall</a>
+</p>
+
+> **Ebb permanently deletes email.** Preview first with a dry run (`ebb scan`, or
 > Preview in the menu bar): it lists what would be removed and changes nothing.
 
 ## Install
@@ -41,6 +61,9 @@ The app lands at `build/Ebb.app`. The CLI is bundled as
 
 ## Setting up an account
 
+<details>
+<summary>Gmail, iCloud and custom IMAP</summary>
+
 Use the menu bar app or `ebb add`. The username is the IMAP login; the password
 must be an app password, not the account password.
 
@@ -55,7 +78,12 @@ Username is the Apple ID.
 Any other provider: `ebb add custom <username> --host <imap-host>` (port 993
 and TLS by default).
 
+</details>
+
 ## What counts as disposable
+
+<details>
+<summary>Verification codes, bulk mail and check interval</summary>
 
 Disposable mail expires in a shorter age (default 1 hour) and can be toggled on
 or off per kind:
@@ -76,7 +104,12 @@ The cleanup check interval (how often Ebb scans the mailbox) is separate from
 message age: a shorter check interval means more frequent scans, not younger
 expiry.
 
+</details>
+
 ## Summaries
+
+<details>
+<summary>Apple Intelligence and Groq fallback</summary>
 
 The "Summarize what matters" button fetches a summary of your 50 newest inbox
 messages without marking them as read.
@@ -89,6 +122,8 @@ free API. You provide your own API key from [console.groq.com/keys](https://cons
 Ebb sends the sender, subject line, date, and first ~400 characters of the
 newest 50 messages. Your key stays in the macOS keychain and never leaves the
 device except for the API request.
+
+</details>
 
 ## How deletion works
 
@@ -119,6 +154,9 @@ own retention applies.
 - The only network traffic is IMAP over TLS to the mail provider
 
 ## CLI reference
+
+<details>
+<summary>Commands, flags and examples</summary>
 
 `<account>` is the username, the account UUID, or the 8-character short id
 shown by `ebb accounts`. Passwords are read from stdin, never from an argument.
@@ -157,6 +195,8 @@ pbpaste | ebb groq-key
 `30d`. `--keep-flagged`, `--keep-important`, `--codes`, `--bulk`, `--permanent`,
 and `--enabled` take `on` or `off`. `--exclude` / `--include` take a raw IMAP
 mailbox name.
+
+</details>
 
 ## Uninstall
 
